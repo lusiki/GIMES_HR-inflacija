@@ -921,6 +921,87 @@ ggplot(daily_with_inflation[!is.na(eurostat_hicp)], aes(x = date)) +
   )
 ```
 
+## Broj spominjanja riječi inflacija vs službena inflacija
+
+```{r inflation-word-count}
+#| label: inflation-word-count
+#| fig-cap: "Mjesečni broj spominjanja riječi inflacija vs Eurostat HICP"
+#| fig-height: 8
+
+# Izbroji sve pojave korijena riječi "inflacij" u svakom članku
+dt[, inflacija_count := stri_count_regex(tolower(FULL_TEXT), "inflacij[a-zčćžšđ]*")]
+
+# Agregiraj po mjesecu
+monthly_mentions <- dt[, .(
+  total_mentions = sum(inflacija_count, na.rm = TRUE),
+  avg_mentions_per_article = mean(inflacija_count, na.rm = TRUE),
+  article_count = .N
+), by = yearmonth][order(yearmonth)]
+
+# Spoji s Eurostat podacima
+monthly_mentions <- merge(monthly_mentions, eurostat_headline, by = "yearmonth", all.x = TRUE)
+
+# Koeficijent za dual axis
+coef_mentions <- max(monthly_mentions$total_mentions, na.rm = TRUE) / 
+                 max(monthly_mentions$eurostat_hicp, na.rm = TRUE)
+
+ggplot(monthly_mentions, aes(x = yearmonth)) +
+  geom_col(aes(y = total_mentions), fill = colors_gimes["primary"], alpha = 0.7, width = 25) +
+  geom_line(aes(y = eurostat_hicp * coef_mentions, color = "Eurostat HICP"), 
+            linewidth = 1.5) +
+  geom_point(aes(y = eurostat_hicp * coef_mentions), 
+             color = colors_gimes["secondary"], size = 2.5) +
+  scale_y_continuous(
+    name = "Broj spominjanja riječi inflacija",
+    labels = comma,
+    sec.axis = sec_axis(~./coef_mentions, name = "HICP Inflacija (YoY %)",
+                       labels = function(x) paste0(x, "%"))
+  ) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  scale_color_manual(values = c("Eurostat HICP" = colors_gimes["secondary"])) +
+  labs(
+    title = "Broj spominjanja riječi inflacija vs službena inflacija",
+    subtitle = "Ukupan mjesečni broj pojavljivanja korijena riječi inflacij* u medijskim člancima | Izvor inflacije: Eurostat HICP",
+    x = NULL,
+    color = NULL
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "gray40"),
+    legend.position = "bottom",
+    axis.title.y.right = element_text(color = colors_gimes["secondary"], face = "bold"),
+    axis.text.y.right = element_text(color = colors_gimes["secondary"]),
+    axis.title.y.left = element_text(color = colors_gimes["primary"], face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+```
+
+## Statistike spominjanja riječi inflacija
+
+```{r inflation-word-stats}
+#| label: inflation-word-stats
+
+word_stats <- data.table(
+  Metrika = c(
+    "Ukupan broj spominjanja riječi inflacija",
+    "Prosječno spominjanja po članku",
+    "Mjesec s najviše spominjanja",
+    "Maksimalan broj spominjanja (mjesec)",
+    "Korelacija s Eurostat HICP"
+  ),
+  Vrijednost = c(
+    format(sum(dt$inflacija_count, na.rm = TRUE), big.mark = ","),
+    round(mean(dt$inflacija_count, na.rm = TRUE), 2),
+    format(monthly_mentions[which.max(total_mentions), yearmonth], "%B %Y"),
+    format(max(monthly_mentions$total_mentions, na.rm = TRUE), big.mark = ","),
+    round(cor(monthly_mentions$total_mentions, monthly_mentions$eurostat_hicp, use = "complete.obs"), 3)
+  )
+)
+
+kable(word_stats, caption = "Statistike spominjanja riječi inflacija") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
 ## Korelacijska tablica
 
 ```{r correlation-table}

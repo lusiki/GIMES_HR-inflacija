@@ -5,7 +5,7 @@
 # Analiza medijske pokrivenosti inflacije u Hrvatskoj
 ## Pregled
 
-Ovaj repozitorij sadrži kod, podatke i analize za praćenje medijske pokrivenosti inflacije u Hrvatskoj kroz GIMES (Government-Industry-Media Economic Sentiment) indeks. Projekt analizira članke hrvatskih online medija od 2021. do 2024. godine kako bi konstruirao kompozitni indeks medijske pozornosti na inflaciju.
+Ovaj repozitorij sadrži kod, podatke i [analize](https://raw.githack.com/lusiki/GIMES_HR-inflacija/main/code/03_analysis/report.html) za praćenje medijske pokrivenosti inflacije u Hrvatskoj kroz GIMES (Government-Industry-Media Economic Sentiment) indeks. Projekt analizira članke hrvatskih online medija od 2021. do 2024. godine kako bi konstruirao kompozitni indeks medijske pozornosti na inflaciju.
 
 ## Status projekta
 

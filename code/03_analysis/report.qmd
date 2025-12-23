@@ -874,90 +874,6 @@ ggplot(comparison, aes(x = yearmonth)) +
   )
 ```
 
-## Eurostat HICP: Headline vs Core
-
-```{r eurostat-headline-vs-core}
-#| label: eurostat-headline-vs-core
-#| fig-cap: "Eurostat HICP: Headline vs Core inflacija"
-#| fig-height: 7
-
-inflation_long <- melt(comparison[, .(yearmonth, eurostat_hicp, eurostat_core)],
-                       id.vars = "yearmonth",
-                       variable.name = "type",
-                       value.name = "value")
-
-type_labels <- c("eurostat_hicp" = "Headline HICP (svi proizvodi)", 
-                "eurostat_core" = "Core HICP (bez energije i hrane)")
-inflation_long[, type_label := type_labels[as.character(type)]]
-
-ggplot(inflation_long, aes(x = yearmonth, y = value, color = type_label)) +
-  geom_line(linewidth = 1.2) +
-  geom_point(size = 2, alpha = 0.6) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
-  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  scale_y_continuous(labels = function(x) paste0(x, "%")) +
-  scale_color_manual(values = c("Headline HICP (svi proizvodi)" = colors_gimes["secondary"],
-                               "Core HICP (bez energije i hrane)" = colors_gimes["primary"])) +
-  labs(
-    title = "Inflacija u Hrvatskoj: Headline vs Core HICP",
-    subtitle = "Usporedba ukupne inflacije i core inflacije (bez volatilnih cijena energije i hrane) | Izvor: Eurostat",
-    x = NULL,
-    y = "Inflacija (YoY %)",
-    color = NULL
-  ) +
-  theme(
-    plot.title = element_text(face = "bold", size = 13),
-    plot.subtitle = element_text(size = 10),
-    legend.position = "bottom",
-    axis.text.x = element_text(size = 9)
-  )
-```
-
-## Usporedba svih izvora inflacije
-
-```{r all-inflation-sources}
-#| label: all-inflation-sources
-#| fig-cap: "Usporedba svih izvora podataka o inflaciji"
-#| fig-height: 7
-
-all_inflation <- melt(comparison[, .(yearmonth, eurostat_hicp, eurostat_core, dzs_cpi)],
-                      id.vars = "yearmonth",
-                      variable.name = "source",
-                      value.name = "inflation")
-
-source_labels <- c(
-  "eurostat_hicp" = "Eurostat HICP (Headline)",
-  "eurostat_core" = "Eurostat HICP (Core)",
-  "dzs_cpi" = "DZS CPI"
-)
-all_inflation[, source_label := source_labels[as.character(source)]]
-
-ggplot(all_inflation, aes(x = yearmonth, y = inflation, color = source_label)) +
-  geom_line(linewidth = 1.2) +
-  geom_point(size = 1.5, alpha = 0.5) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
-  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  scale_y_continuous(labels = function(x) paste0(x, "%")) +
-  scale_color_manual(values = c(
-    "Eurostat HICP (Headline)" = colors_gimes["secondary"],
-    "Eurostat HICP (Core)" = colors_gimes["primary"],
-    "DZS CPI" = colors_gimes["warning"]
-  )) +
-  labs(
-    title = "Usporedba izvora podataka o inflaciji u Hrvatskoj",
-    subtitle = "Eurostat HICP (headline i core) vs DZS CPI",
-    x = NULL,
-    y = "Inflacija (YoY %)",
-    color = "Izvor"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold", size = 13),
-    plot.subtitle = element_text(size = 10),
-    legend.position = "bottom",
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 8)
-  )
-```
-
 ## Dnevni broj članaka kao samostalni indikator vs službena inflacija
 
 ```{r daily-vs-inflation}
@@ -1015,17 +931,13 @@ correlations <- data.table(
     "GIMES Index vs Eurostat HICP",
     "GIMES Index vs Eurostat Core",
     "GIMES Index vs DZS CPI",
-    "Volumen (broj članaka) vs Eurostat HICP",
-    "Eurostat HICP vs DZS CPI",
-    "Eurostat HICP vs Core HICP"
+    "Volumen (broj članaka) vs Eurostat HICP"
   ),
   Korelacija = c(
     round(cor(comparison$gimes_index, comparison$eurostat_hicp, use = "complete.obs"), 3),
     round(cor(comparison$gimes_index, comparison$eurostat_core, use = "complete.obs"), 3),
     round(cor(comparison$gimes_index, comparison$dzs_cpi, use = "complete.obs"), 3),
-    round(cor(comparison$volume, comparison$eurostat_hicp, use = "complete.obs"), 3),
-    round(cor(comparison$eurostat_hicp, comparison$dzs_cpi, use = "complete.obs"), 3),
-    round(cor(comparison$eurostat_hicp, comparison$eurostat_core, use = "complete.obs"), 3)
+    round(cor(comparison$volume, comparison$eurostat_hicp, use = "complete.obs"), 3)
   )
 )
 
@@ -1184,47 +1096,6 @@ kable(findings, caption = "Sažetak ključnih nalaza analize") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
   row_spec(c(4, 7, 10, 13), background = colors_gimes["light"])
 ```
-
-## Interpretacija rezultata
-
-### 1. Medijska pozornost prati ekonomsku stvarnost
-
-GIMES indeks pokazuje **visoku korelaciju** sa službenom inflacijom, što sugerira da hrvatska medijska sfera adekvatno reflektira inflacijske pritiske.
-
-### 2. Lead/lag dinamika
-
-Analiza unakrsne korelacije otkriva da medijska pozornost:
-
-- **Ne predvodi značajno** službenu inflaciju (slaba korelacija na negativnim pomacima)
-- **Prati trenutačno stanje** ili reagira s kratkim odgodom
-- Najjača korelacija je pri pomaku blizu nule
-
-**Implikacija**: Mediji su reaktivni, ne proaktivni. Povećana medijska pozornost dolazi kao odgovor na vidljivu inflaciju.
-
-### 3. Dnevni broj članaka kao jednostavan indikator
-
-Dnevni broj članaka o inflaciji (s 30-dnevnim kliznim prosjekom) pokazuje **jaku korelaciju** sa službenom inflacijom i može poslužiti kao jednostavan, real-time indikator medijske percepcije inflacijskih pritisaka.
-
-### 4. Razlike između izvora
-
-- **Eurostat HICP** i **DZS CPI** pokazuju visoku korelaciju (r > 0.99)
-- **Core inflacija** sporije reagira na šokove cijena energije i hrane
-- GIMES indeks bolje prati headline nego core inflaciju
-
-## Ograničenja analize
-
-1. **Pristup temeljen na ključnim riječima** može propustiti relevantne članke
-2. **Automatska sentiment analiza** ima ograničenu točnost za hrvatski jezik
-3. **Podaci o dosegu** nisu kompletni za sve izvore
-4. **Regionalna pokrivenost** može biti neravnomjerna
-
-## Preporuke za daljnja istraživanja
-
-1. **Proširenje na TV i radio sadržaj**
-2. **Naprednije NLP metode** (topic modeling, NER)
-3. **Validacija sa survey podacima** o inflacijskim očekivanjima
-4. **Kauzalna analiza** (Granger causality)
-5. **Predikcijski modeli** (ML modeli za prognoziranje)
 
 ---
 

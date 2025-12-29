@@ -678,10 +678,10 @@ if(length(eurostat_data) == 0 || is.null(eurostat_data$gdp)) {
 
 # Konstrukcija semantičkih indeksa
 
-## Mjesečna agregacija
+## Mjesečna agregacija i spajanje s Eurostat podacima
 
-```{r monthly-aggregation}
-#| label: monthly-aggregation
+```{r monthly-aggregation-and-merge}
+#| label: monthly-aggregation-and-merge
 
 sem_cols_all <- c(sem_cols, names(dt)[grepl("^macro_", names(dt))], "semantic_total")
 
@@ -695,13 +695,8 @@ monthly <- dt[, c(
 for(col in sem_cols_all) {
   monthly[, paste0(col, "_avg") := get(col) / N]
 }
-```
 
-## Spajanje s Eurostat podacima
-
-```{r merge-eurostat}
-#| label: merge-eurostat
-
+# Kreiraj analysis data.table i spoji Eurostat podatke PRIJE konstrukcije indeksa
 analysis <- copy(monthly)
 
 # Spoji mjesečne indikatore
@@ -728,6 +723,8 @@ if(!is.null(eurostat_data$gdp)) {
 }
 
 analysis <- analysis[order(yearmonth)]
+
+message("Spojeno ", nrow(analysis), " mjeseci podataka")
 ```
 
 ## Konstrukcija indeksa
@@ -737,7 +734,9 @@ analysis <- analysis[order(yearmonth)]
 
 normalize_01 <- function(x) {
   if(all(is.na(x))) return(rep(0.5, length(x)))
-  (x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE))
+  rng <- range(x, na.rm = TRUE)
+  if(rng[1] == rng[2]) return(rep(0.5, length(x)))
+  (x - rng[1]) / (rng[2] - rng[1])
 }
 
 # === INDEKS 1: Simple Aggregate Index (SAI) ===
@@ -747,15 +746,35 @@ analysis[, SAI := normalize_01(semantic_total) * 100]
 macro_cols <- names(analysis)[grepl("^macro_", names(analysis))]
 
 # Korelacije s industrijskom proizvodnjom kao referentnim indikatorom
-correlations_with_ref <- sapply(macro_cols, function(col) {
-  cor(analysis[[col]], analysis$ind_prod_yoy, use = "complete.obs")
-})
+# Provjeri da ind_prod_yoy postoji i ima vrijednosti
+if("ind_prod_yoy" %in% names(analysis) && sum(!is.na(analysis$ind_prod_yoy)) > 5) {
+  correlations_with_ref <- sapply(macro_cols, function(col) {
+    if(sum(!is.na(analysis[[col]]) & !is.na(analysis$ind_prod_yoy)) > 5) {
+      cor(analysis[[col]], analysis$ind_prod_yoy, use = "complete.obs")
+    } else {
+      0
+    }
+  })
+} else {
+  # Fallback: koristi SAI kao proxy
+  correlations_with_ref <- sapply(macro_cols, function(col) {
+    if(sum(!is.na(analysis[[col]])) > 5) {
+      cor(analysis[[col]], analysis$semantic_total, use = "complete.obs")
+    } else {
+      0
+    }
+  })
+}
 
 # Zamijeni NA s 0
 correlations_with_ref[is.na(correlations_with_ref)] <- 0
 
 weights <- pmax(correlations_with_ref, 0)
-if(sum(weights) > 0) weights <- weights / sum(weights) else weights <- rep(1/length(weights), length(weights))
+if(sum(weights) > 0) {
+  weights <- weights / sum(weights)
+} else {
+  weights <- rep(1/length(weights), length(weights))
+}
 
 analysis[, WSI := {
   weighted_sum <- 0
@@ -777,8 +796,11 @@ if(nrow(pca_data_complete) > 10 && ncol(pca_data_complete) > 2) {
   pca_matrix[is.na(pca_matrix)] <- 0
   pc1_scores <- as.numeric(scale(pca_matrix %*% pc1_loadings))
   
-  if(cor(pc1_scores, analysis$ind_prod_yoy, use = "complete.obs") < 0) {
-    pc1_scores <- -pc1_scores
+  # Provjeri korelaciju samo ako postoji referentna varijabla
+  if("ind_prod_yoy" %in% names(analysis) && sum(!is.na(analysis$ind_prod_yoy)) > 5) {
+    if(cor(pc1_scores, analysis$ind_prod_yoy, use = "complete.obs") < 0) {
+      pc1_scores <- -pc1_scores
+    }
   }
   analysis[, PCI := normalize_01(pc1_scores) * 100]
 } else {
@@ -786,7 +808,6 @@ if(nrow(pca_data_complete) > 10 && ncol(pca_data_complete) > 2) {
 }
 
 # === INDEKS 4: Sektorski kompozitni indeks (SCI) ===
-# Kombinira ključne sektore: industrija, građevinarstvo, trgovina, turizam
 key_sectors <- c("macro_industrija", "macro_gradevinarstvo", "macro_trgovina", "macro_turizam")
 key_sectors <- key_sectors[key_sectors %in% names(analysis)]
 
@@ -798,7 +819,6 @@ if(length(key_sectors) > 0) {
 }
 
 # === INDEKS 5: BDP fokusirani indeks (GDI) ===
-# Samo kategorije direktno povezane s BDP-om
 gdp_cats <- c("macro_bdp_agregat", "macro_investicije", "macro_potrosnja")
 gdp_cats <- gdp_cats[gdp_cats %in% names(analysis)]
 
@@ -813,6 +833,8 @@ if(length(gdp_cats) > 0) {
 for(idx in c("SAI", "WSI", "PCI", "SCI", "GDI")) {
   analysis[, paste0(idx, "_MA3") := frollmean(get(idx), n = 3, align = "center")]
 }
+
+message("Konstruirano 5 semantičkih indeksa")
 ```
 
 # Usporedba s službenim podacima
@@ -824,47 +846,73 @@ for(idx in c("SAI", "WSI", "PCI", "SCI", "GDI")) {
 #| fig-cap: "Semantički indeksi vs industrijska proizvodnja"
 #| fig-height: 8
 
-# Skaliraj indekse za usporedbu
-ind_range <- range(analysis$ind_prod_yoy, na.rm = TRUE)
-scale_factor <- diff(ind_range) / 100
-offset <- ind_range[1]
+# Provjeri dostupnost podataka
+has_ind_prod <- "ind_prod_yoy" %in% names(analysis) && sum(!is.na(analysis$ind_prod_yoy)) > 5
 
-indices_comparison <- analysis[, .(
-  yearmonth,
-  SAI_scaled = SAI * scale_factor + offset,
-  WSI_scaled = WSI * scale_factor + offset,
-  SCI_scaled = SCI * scale_factor + offset,
-  ind_prod_yoy
-)]
-
-indices_long <- melt(indices_comparison, id.vars = "yearmonth",
-                     variable.name = "serija", value.name = "vrijednost")
-
-ggplot(indices_long, aes(x = yearmonth, y = vrijednost, color = serija)) +
-  geom_line(linewidth = 1, alpha = 0.8) +
-  scale_color_manual(
-    values = c(
-      "SAI_scaled" = pal$cool,
-      "WSI_scaled" = pal$success,
-      "SCI_scaled" = pal$warm,
-      "ind_prod_yoy" = pal$highlight
-    ),
-    labels = c(
-      "SAI_scaled" = "SAI (skalirano)",
-      "WSI_scaled" = "WSI (skalirano)",
-      "SCI_scaled" = "SCI (skalirano)",
-      "ind_prod_yoy" = "Industrijska proizvodnja (Y/Y)"
-    )
-  ) +
-  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  labs(
-    title = "Semantički indeksi vs Industrijska proizvodnja",
-    subtitle = "Indeksi skalirani na raspon industrijske proizvodnje",
-    x = NULL,
-    y = "Y/Y promjena (%)",
-    color = NULL
-  ) +
-  theme(legend.position = "bottom")
+if(has_ind_prod) {
+  # Skaliraj indekse za usporedbu
+  ind_range <- range(analysis$ind_prod_yoy, na.rm = TRUE)
+  scale_factor <- diff(ind_range) / 100
+  offset <- ind_range[1]
+  
+  indices_comparison <- analysis[, .(
+    yearmonth,
+    SAI_scaled = SAI * scale_factor + offset,
+    WSI_scaled = WSI * scale_factor + offset,
+    SCI_scaled = SCI * scale_factor + offset,
+    ind_prod_yoy
+  )]
+  
+  indices_long <- melt(indices_comparison, id.vars = "yearmonth",
+                       variable.name = "serija", value.name = "vrijednost")
+  
+  ggplot(indices_long, aes(x = yearmonth, y = vrijednost, color = serija)) +
+    geom_line(linewidth = 1, alpha = 0.8) +
+    scale_color_manual(
+      values = c(
+        "SAI_scaled" = pal$cool,
+        "WSI_scaled" = pal$success,
+        "SCI_scaled" = pal$warm,
+        "ind_prod_yoy" = pal$highlight
+      ),
+      labels = c(
+        "SAI_scaled" = "SAI (skalirano)",
+        "WSI_scaled" = "WSI (skalirano)",
+        "SCI_scaled" = "SCI (skalirano)",
+        "ind_prod_yoy" = "Industrijska proizvodnja (Y/Y)"
+      )
+    ) +
+    scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+    labs(
+      title = "Semantički indeksi vs Industrijska proizvodnja",
+      subtitle = "Indeksi skalirani na raspon industrijske proizvodnje",
+      x = NULL,
+      y = "Y/Y promjena (%)",
+      color = NULL
+    ) +
+    theme(legend.position = "bottom")
+} else {
+  # Fallback: prikaži samo semantičke indekse
+  indices_only <- analysis[, .(yearmonth, SAI, WSI, SCI, GDI)]
+  indices_long <- melt(indices_only, id.vars = "yearmonth",
+                       variable.name = "indeks", value.name = "vrijednost")
+  
+  ggplot(indices_long, aes(x = yearmonth, y = vrijednost, color = indeks)) +
+    geom_line(linewidth = 1) +
+    scale_color_manual(values = c(
+      "SAI" = pal$cool, "WSI" = pal$success, 
+      "SCI" = pal$warm, "GDI" = pal$purple
+    )) +
+    scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+    labs(
+      title = "Semantički indeksi gospodarske aktivnosti",
+      subtitle = "Napomena: Eurostat podaci nisu dostupni za usporedbu",
+      x = NULL,
+      y = "Indeks (0-100)",
+      color = NULL
+    ) +
+    theme(legend.position = "bottom")
+}
 ```
 
 ## Usporedba po sektorima
@@ -874,43 +922,94 @@ ggplot(indices_long, aes(x = yearmonth, y = vrijednost, color = serija)) +
 #| fig-cap: "Sektorski semantički indeksi vs službeni pokazatelji"
 #| fig-height: 12
 
+# Definiraj pomocne varijable za provjeru
+has_ind <- "ind_prod_yoy" %in% names(analysis) && sum(!is.na(analysis$ind_prod_yoy)) > 3
+has_con <- "construction_yoy" %in% names(analysis) && sum(!is.na(analysis$construction_yoy)) > 3
+has_ret <- "retail_yoy" %in% names(analysis) && sum(!is.na(analysis$retail_yoy)) > 3
+has_esi <- "esi" %in% names(analysis) && sum(!is.na(analysis$esi)) > 3
+
+plot_list <- list()
+
 # Industrija
-p_ind <- ggplot(analysis, aes(x = yearmonth)) +
-  geom_line(aes(y = normalize_01(macro_industrija) * diff(range(ind_prod_yoy, na.rm=TRUE)) + 
-                  min(ind_prod_yoy, na.rm=TRUE), color = "Semantički"), linewidth = 1) +
-  geom_line(aes(y = ind_prod_yoy, color = "Službeni"), linewidth = 1) +
-  scale_color_manual(values = c("Semantički" = pal$cool, "Službeni" = pal$highlight)) +
-  labs(title = "Industrija", x = NULL, y = "Y/Y %", color = NULL) +
-  theme(legend.position = "bottom")
+if(has_ind && "macro_industrija" %in% names(analysis)) {
+  p_ind <- ggplot(analysis, aes(x = yearmonth)) +
+    geom_line(aes(y = normalize_01(macro_industrija) * diff(range(ind_prod_yoy, na.rm=TRUE)) + 
+                    min(ind_prod_yoy, na.rm=TRUE), color = "Semantički"), linewidth = 1) +
+    geom_line(aes(y = ind_prod_yoy, color = "Službeni"), linewidth = 1) +
+    scale_color_manual(values = c("Semantički" = pal$cool, "Službeni" = pal$highlight)) +
+    labs(title = "Industrija", x = NULL, y = "Y/Y %", color = NULL) +
+    theme(legend.position = "bottom")
+  plot_list$ind <- p_ind
+} else if("macro_industrija" %in% names(analysis)) {
+  p_ind <- ggplot(analysis, aes(x = yearmonth, y = macro_industrija)) +
+    geom_line(color = pal$cool, linewidth = 1) +
+    labs(title = "Industrija (samo semantički)", x = NULL, y = "Broj pojmova")
+  plot_list$ind <- p_ind
+}
 
 # Građevinarstvo
-p_con <- ggplot(analysis, aes(x = yearmonth)) +
-  geom_line(aes(y = normalize_01(macro_gradevinarstvo) * diff(range(construction_yoy, na.rm=TRUE)) + 
-                  min(construction_yoy, na.rm=TRUE), color = "Semantički"), linewidth = 1) +
-  geom_line(aes(y = construction_yoy, color = "Službeni"), linewidth = 1) +
-  scale_color_manual(values = c("Semantički" = pal$cool, "Službeni" = pal$highlight)) +
-  labs(title = "Građevinarstvo", x = NULL, y = "Y/Y %", color = NULL) +
-  theme(legend.position = "bottom")
+if(has_con && "macro_gradevinarstvo" %in% names(analysis)) {
+  p_con <- ggplot(analysis, aes(x = yearmonth)) +
+    geom_line(aes(y = normalize_01(macro_gradevinarstvo) * diff(range(construction_yoy, na.rm=TRUE)) + 
+                    min(construction_yoy, na.rm=TRUE), color = "Semantički"), linewidth = 1) +
+    geom_line(aes(y = construction_yoy, color = "Službeni"), linewidth = 1) +
+    scale_color_manual(values = c("Semantički" = pal$cool, "Službeni" = pal$highlight)) +
+    labs(title = "Građevinarstvo", x = NULL, y = "Y/Y %", color = NULL) +
+    theme(legend.position = "bottom")
+  plot_list$con <- p_con
+} else if("macro_gradevinarstvo" %in% names(analysis)) {
+  p_con <- ggplot(analysis, aes(x = yearmonth, y = macro_gradevinarstvo)) +
+    geom_line(color = pal$cool, linewidth = 1) +
+    labs(title = "Građevinarstvo (samo semantički)", x = NULL, y = "Broj pojmova")
+  plot_list$con <- p_con
+}
 
 # Trgovina
-p_ret <- ggplot(analysis, aes(x = yearmonth)) +
-  geom_line(aes(y = normalize_01(macro_trgovina) * diff(range(retail_yoy, na.rm=TRUE)) + 
-                  min(retail_yoy, na.rm=TRUE), color = "Semantički"), linewidth = 1) +
-  geom_line(aes(y = retail_yoy, color = "Službeni"), linewidth = 1) +
-  scale_color_manual(values = c("Semantički" = pal$cool, "Službeni" = pal$highlight)) +
-  labs(title = "Maloprodaja", x = NULL, y = "Y/Y %", color = NULL) +
-  theme(legend.position = "bottom")
+if(has_ret && "macro_trgovina" %in% names(analysis)) {
+  p_ret <- ggplot(analysis, aes(x = yearmonth)) +
+    geom_line(aes(y = normalize_01(macro_trgovina) * diff(range(retail_yoy, na.rm=TRUE)) + 
+                    min(retail_yoy, na.rm=TRUE), color = "Semantički"), linewidth = 1) +
+    geom_line(aes(y = retail_yoy, color = "Službeni"), linewidth = 1) +
+    scale_color_manual(values = c("Semantički" = pal$cool, "Službeni" = pal$highlight)) +
+    labs(title = "Maloprodaja", x = NULL, y = "Y/Y %", color = NULL) +
+    theme(legend.position = "bottom")
+  plot_list$ret <- p_ret
+} else if("macro_trgovina" %in% names(analysis)) {
+  p_ret <- ggplot(analysis, aes(x = yearmonth, y = macro_trgovina)) +
+    geom_line(color = pal$cool, linewidth = 1) +
+    labs(title = "Trgovina (samo semantički)", x = NULL, y = "Broj pojmova")
+  plot_list$ret <- p_ret
+}
 
 # ESI
-p_esi <- ggplot(analysis, aes(x = yearmonth)) +
-  geom_line(aes(y = normalize_01(macro_sentiment_poslovni) * diff(range(esi, na.rm=TRUE)) + 
-                  min(esi, na.rm=TRUE), color = "Semantički"), linewidth = 1) +
-  geom_line(aes(y = esi, color = "Službeni (ESI)"), linewidth = 1) +
-  scale_color_manual(values = c("Semantički" = pal$cool, "Službeni (ESI)" = pal$highlight)) +
-  labs(title = "Poslovni sentiment", x = NULL, y = "Indeks", color = NULL) +
-  theme(legend.position = "bottom")
+if(has_esi && "macro_sentiment_poslovni" %in% names(analysis)) {
+  p_esi <- ggplot(analysis, aes(x = yearmonth)) +
+    geom_line(aes(y = normalize_01(macro_sentiment_poslovni) * diff(range(esi, na.rm=TRUE)) + 
+                    min(esi, na.rm=TRUE), color = "Semantički"), linewidth = 1) +
+    geom_line(aes(y = esi, color = "Službeni (ESI)"), linewidth = 1) +
+    scale_color_manual(values = c("Semantički" = pal$cool, "Službeni (ESI)" = pal$highlight)) +
+    labs(title = "Poslovni sentiment", x = NULL, y = "Indeks", color = NULL) +
+    theme(legend.position = "bottom")
+  plot_list$esi <- p_esi
+} else if("macro_sentiment_poslovni" %in% names(analysis)) {
+  p_esi <- ggplot(analysis, aes(x = yearmonth, y = macro_sentiment_poslovni)) +
+    geom_line(color = pal$cool, linewidth = 1) +
+    labs(title = "Poslovni sentiment (samo semantički)", x = NULL, y = "Broj pojmova")
+  plot_list$esi <- p_esi
+}
 
-(p_ind | p_con) / (p_ret | p_esi)
+# Kombiniraj dostupne grafove
+if(length(plot_list) >= 4) {
+  (plot_list[[1]] | plot_list[[2]]) / (plot_list[[3]] | plot_list[[4]])
+} else if(length(plot_list) >= 2) {
+  wrap_plots(plot_list, ncol = 2)
+} else if(length(plot_list) == 1) {
+  plot_list[[1]]
+} else {
+  ggplot() + 
+    annotate("text", x = 0.5, y = 0.5, label = "Nema dostupnih podataka za vizualizaciju") +
+    theme_void()
+}
 ```
 
 ## Korelacijska matrica
@@ -921,28 +1020,36 @@ p_esi <- ggplot(analysis, aes(x = yearmonth)) +
 #| fig-height: 10
 
 # Pripremi podatke za korelacijsku matricu
-cor_vars <- c(macro_cols, "ind_prod_yoy", "construction_yoy", "retail_yoy", "esi", "gdp_yoy")
+official_vars <- c("ind_prod_yoy", "construction_yoy", "retail_yoy", "esi", "gdp_yoy")
+available_official <- official_vars[official_vars %in% names(analysis)]
+available_official <- available_official[sapply(available_official, function(v) sum(!is.na(analysis[[v]])) > 3)]
+
+cor_vars <- c(macro_cols, available_official)
 cor_vars <- cor_vars[cor_vars %in% names(analysis)]
 
-cor_data <- analysis[, .SD, .SDcols = cor_vars]
-cor_matrix <- cor(cor_data, use = "pairwise.complete.obs")
-
-# Preimenuj za čitljivost
-rownames(cor_matrix) <- gsub("macro_", "", rownames(cor_matrix))
-colnames(cor_matrix) <- gsub("macro_", "", colnames(cor_matrix))
-
-corrplot(cor_matrix,
-         method = "color",
-         type = "upper",
-         order = "hclust",
-         tl.col = "black",
-         tl.srt = 45,
-         tl.cex = 0.7,
-         addCoef.col = "black",
-         number.cex = 0.5,
-         col = colorRampPalette(c(pal$cool, "white", pal$highlight))(100),
-         title = "Korelacijska matrica",
-         mar = c(0,0,2,0))
+if(length(cor_vars) > 2) {
+  cor_data <- analysis[, .SD, .SDcols = cor_vars]
+  cor_matrix <- cor(cor_data, use = "pairwise.complete.obs")
+  
+  # Preimenuj za čitljivost
+  rownames(cor_matrix) <- gsub("macro_", "", rownames(cor_matrix))
+  colnames(cor_matrix) <- gsub("macro_", "", colnames(cor_matrix))
+  
+  corrplot(cor_matrix,
+           method = "color",
+           type = "upper",
+           order = "hclust",
+           tl.col = "black",
+           tl.srt = 45,
+           tl.cex = 0.7,
+           addCoef.col = "black",
+           number.cex = 0.5,
+           col = colorRampPalette(c(pal$cool, "white", pal$highlight))(100),
+           title = "Korelacijska matrica",
+           mar = c(0,0,2,0))
+} else {
+  message("Nedovoljno varijabli za korelacijsku matricu")
+}
 ```
 
 ## Performanse indeksa
@@ -951,12 +1058,14 @@ corrplot(cor_matrix,
 #| label: index-performance
 
 calc_performance <- function(idx_col, ref_col) {
+  if(!ref_col %in% names(analysis)) return(list(cor = NA, rmse = NA, mae = NA))
   complete_idx <- which(!is.na(analysis[[idx_col]]) & !is.na(analysis[[ref_col]]))
   if(length(complete_idx) < 5) return(list(cor = NA, rmse = NA, mae = NA))
   
-  idx_scaled <- normalize_01(analysis[[idx_col]][complete_idx]) * 
-    diff(range(analysis[[ref_col]][complete_idx])) + 
-    min(analysis[[ref_col]][complete_idx])
+  ref_range <- range(analysis[[ref_col]][complete_idx])
+  if(diff(ref_range) == 0) return(list(cor = NA, rmse = NA, mae = NA))
+  
+  idx_scaled <- normalize_01(analysis[[idx_col]][complete_idx]) * diff(ref_range) + ref_range[1]
   ref_vals <- analysis[[ref_col]][complete_idx]
   
   list(
@@ -975,27 +1084,42 @@ performance_results <- data.table(
   MAE = numeric()
 )
 
-for(idx in c("SAI", "WSI", "PCI", "SCI", "GDI")) {
-  for(ref in c("ind_prod_yoy", "construction_yoy", "retail_yoy", "esi", "gdp_yoy")) {
-    if(ref %in% names(analysis)) {
+ref_indicators <- c("ind_prod_yoy", "construction_yoy", "retail_yoy", "esi", "gdp_yoy")
+available_refs <- ref_indicators[ref_indicators %in% names(analysis)]
+available_refs <- available_refs[sapply(available_refs, function(v) sum(!is.na(analysis[[v]])) > 5)]
+
+if(length(available_refs) > 0) {
+  for(idx in c("SAI", "WSI", "PCI", "SCI", "GDI")) {
+    for(ref in available_refs) {
       perf <- calc_performance(idx, ref)
-      performance_results <- rbind(performance_results, data.table(
-        Indeks = idx,
-        Referentni_pokazatelj = ref,
-        Korelacija = round(perf$cor, 3),
-        RMSE = round(perf$rmse, 2),
-        MAE = round(perf$mae, 2)
-      ))
+      if(!is.na(perf$cor)) {
+        performance_results <- rbind(performance_results, data.table(
+          Indeks = idx,
+          Referentni_pokazatelj = ref,
+          Korelacija = round(perf$cor, 3),
+          RMSE = round(perf$rmse, 2),
+          MAE = round(perf$mae, 2)
+        ))
+      }
     }
   }
+  
+  # Prikaži najbolje performanse po indeksu
+  if(nrow(performance_results) > 0) {
+    best_per_index <- performance_results[, .SD[which.max(Korelacija)], by = Indeks]
+    
+    kable(best_per_index, caption = "Najbolje performanse po semantičkom indeksu") %>%
+      kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
+      row_spec(which.max(best_per_index$Korelacija), bold = TRUE, background = pal$success)
+  } else {
+    message("Nema dovoljno podataka za izračun performansi")
+  }
+} else {
+  message("Nema dostupnih referentnih pokazatelja za usporedbu")
+  # Kreiraj praznu tablicu za kasniju upotrebu
+  best_per_index <- data.table(Indeks = "SAI", Referentni_pokazatelj = NA, 
+                                Korelacija = NA, RMSE = NA, MAE = NA)
 }
-
-# Prikaži najbolje performanse po indeksu
-best_per_index <- performance_results[, .SD[which.max(Korelacija)], by = Indeks]
-
-kable(best_per_index, caption = "Najbolje performanse po semantičkom indeksu") %>%
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
-  row_spec(which.max(best_per_index$Korelacija), bold = TRUE, background = pal$success)
 ```
 
 ## Detaljna korelacijska tablica
@@ -1004,14 +1128,20 @@ kable(best_per_index, caption = "Najbolje performanse po semantičkom indeksu") 
 #| label: detailed-correlations
 
 # Korelacije svih makro kategorija sa svim službenim pokazateljima
-cat_correlations <- data.table(
-  Kategorija = macro_cols
-)
+cat_correlations <- data.table(Kategorija = macro_cols)
 
-for(ref in c("ind_prod_yoy", "construction_yoy", "retail_yoy", "esi", "gdp_yoy")) {
-  if(ref %in% names(analysis)) {
+ref_indicators <- c("ind_prod_yoy", "construction_yoy", "retail_yoy", "esi", "gdp_yoy")
+available_refs <- ref_indicators[ref_indicators %in% names(analysis)]
+available_refs <- available_refs[sapply(available_refs, function(v) sum(!is.na(analysis[[v]])) > 3)]
+
+if(length(available_refs) > 0) {
+  for(ref in available_refs) {
     cat_correlations[, (ref) := sapply(macro_cols, function(col) {
-      round(cor(analysis[[col]], analysis[[ref]], use = "complete.obs"), 3)
+      if(sum(!is.na(analysis[[col]]) & !is.na(analysis[[ref]])) > 3) {
+        round(cor(analysis[[col]], analysis[[ref]], use = "complete.obs"), 3)
+      } else {
+        NA_real_
+      }
     })]
   }
 }
@@ -1075,9 +1205,13 @@ lag_results <- data.table(
 
 all_cats <- c(macro_cols, "SAI", "WSI", "SCI", "GDI")
 
-for(cat in all_cats) {
-  for(ref in c("ind_prod_yoy", "construction_yoy", "retail_yoy", "gdp_yoy")) {
-    if(ref %in% names(analysis)) {
+ref_indicators <- c("ind_prod_yoy", "construction_yoy", "retail_yoy", "gdp_yoy")
+available_refs <- ref_indicators[ref_indicators %in% names(analysis)]
+available_refs <- available_refs[sapply(available_refs, function(v) sum(!is.na(analysis[[v]])) > 10)]
+
+if(length(available_refs) > 0) {
+  for(cat in all_cats) {
+    for(ref in available_refs) {
       opt <- find_optimal_lag(analysis[[cat]], analysis[[ref]])
       if(!is.na(opt$lag)) {
         lag_results <- rbind(lag_results, data.table(
@@ -1089,21 +1223,28 @@ for(cat in all_cats) {
       }
     }
   }
+  
+  lag_results[, Interpretacija := fcase(
+    Optimalni_lag < 0, paste0("Predvodi za ", abs(Optimalni_lag), " mj."),
+    Optimalni_lag > 0, paste0("Prati za ", Optimalni_lag, " mj."),
+    default = "Istovremeno"
+  )]
+  
+  # Prikaži leading indikatore
+  leading_indicators <- lag_results[Optimalni_lag < 0][order(-Max_korelacija)]
+  
+  if(nrow(leading_indicators) > 0) {
+    kable(head(leading_indicators, 15), 
+          caption = "Top 15 leading indikatora (semantika predvodi službene podatke)") %>%
+      kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
+      row_spec(1:min(5, nrow(leading_indicators)), background = "#d4edda")
+  } else {
+    message("Nema identificiranih leading indikatora")
+  }
+} else {
+  message("Nema dostupnih referentnih pokazatelja za lag analizu")
+  leading_indicators <- data.table()
 }
-
-lag_results[, Interpretacija := fcase(
-  Optimalni_lag < 0, paste0("Predvodi za ", abs(Optimalni_lag), " mj."),
-  Optimalni_lag > 0, paste0("Prati za ", Optimalni_lag, " mj."),
-  default = "Istovremeno"
-)]
-
-# Prikaži leading indikatore
-leading_indicators <- lag_results[Optimalni_lag < 0][order(-Max_korelacija)]
-
-kable(head(leading_indicators, 15), 
-      caption = "Top 15 leading indikatora (semantika predvodi službene podatke)") %>%
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
-  row_spec(1:min(5, nrow(leading_indicators)), background = "#d4edda")
 ```
 
 ## Cross-correlation vizualizacija
@@ -1113,44 +1254,61 @@ kable(head(leading_indicators, 15),
 #| fig-cap: "Cross-correlation: Semantički indeksi vs Industrijska proizvodnja"
 #| fig-height: 8
 
-# CCF za glavne indekse vs industrijsku proizvodnju
-ccf_results <- list()
+has_ind_prod <- "ind_prod_yoy" %in% names(analysis) && sum(!is.na(analysis$ind_prod_yoy)) > 15
 
-for(idx in c("SAI", "WSI", "SCI", "GDI")) {
-  complete_idx <- which(!is.na(analysis[[idx]]) & !is.na(analysis$ind_prod_yoy))
-  if(length(complete_idx) > 20) {
-    ccf_obj <- ccf(analysis[[idx]][complete_idx], 
-                   analysis$ind_prod_yoy[complete_idx],
-                   lag.max = 6, plot = FALSE)
-    ccf_results[[idx]] <- data.table(
-      indeks = idx,
-      lag = as.numeric(ccf_obj$lag),
-      correlation = as.numeric(ccf_obj$acf)
-    )
+if(has_ind_prod) {
+  # CCF za glavne indekse vs industrijsku proizvodnju
+  ccf_results <- list()
+  
+  for(idx in c("SAI", "WSI", "SCI", "GDI")) {
+    complete_idx <- which(!is.na(analysis[[idx]]) & !is.na(analysis$ind_prod_yoy))
+    if(length(complete_idx) > 20) {
+      ccf_obj <- ccf(analysis[[idx]][complete_idx], 
+                     analysis$ind_prod_yoy[complete_idx],
+                     lag.max = 6, plot = FALSE)
+      ccf_results[[idx]] <- data.table(
+        indeks = idx,
+        lag = as.numeric(ccf_obj$lag),
+        correlation = as.numeric(ccf_obj$acf)
+      )
+    }
   }
+  
+  if(length(ccf_results) > 0) {
+    ccf_df <- rbindlist(ccf_results)
+    
+    ggplot(ccf_df, aes(x = lag, y = correlation, fill = indeks)) +
+      geom_col(position = position_dodge(width = 0.7), alpha = 0.8) +
+      geom_hline(yintercept = 0, color = "gray50") +
+      geom_hline(yintercept = c(-0.2, 0.2), linetype = "dashed", color = "gray70") +
+      facet_wrap(~indeks, ncol = 2) +
+      scale_fill_manual(values = c(
+        "SAI" = pal$cool,
+        "WSI" = pal$success,
+        "SCI" = pal$warm,
+        "GDI" = pal$purple
+      )) +
+      scale_x_continuous(breaks = -6:6) +
+      labs(
+        title = "Cross-correlation: Semantički indeksi vs Industrijska proizvodnja",
+        subtitle = "Negativni lag = semantika predvodi | Pozitivni lag = semantika prati",
+        x = "Vremenski pomak (mjeseci)",
+        y = "Korelacija"
+      ) +
+      theme(legend.position = "none")
+  } else {
+    message("Nedovoljno podataka za CCF analizu")
+  }
+} else {
+  # Prikaži autokorelaciju semantičkih indeksa
+  ggplot(analysis, aes(x = yearmonth, y = SAI)) +
+    geom_line(color = pal$cool, linewidth = 1) +
+    labs(
+      title = "SAI indeks (Eurostat podaci nisu dostupni za CCF)",
+      x = NULL,
+      y = "SAI"
+    )
 }
-
-ccf_df <- rbindlist(ccf_results)
-
-ggplot(ccf_df, aes(x = lag, y = correlation, fill = indeks)) +
-  geom_col(position = position_dodge(width = 0.7), alpha = 0.8) +
-  geom_hline(yintercept = 0, color = "gray50") +
-  geom_hline(yintercept = c(-0.2, 0.2), linetype = "dashed", color = "gray70") +
-  facet_wrap(~indeks, ncol = 2) +
-  scale_fill_manual(values = c(
-    "SAI" = pal$cool,
-    "WSI" = pal$success,
-    "SCI" = pal$warm,
-    "GDI" = pal$purple
-  )) +
-  scale_x_continuous(breaks = -6:6) +
-  labs(
-    title = "Cross-correlation: Semantički indeksi vs Industrijska proizvodnja",
-    subtitle = "Negativni lag = semantika predvodi | Pozitivni lag = semantika prati",
-    x = "Vremenski pomak (mjeseci)",
-    y = "Korelacija"
-  ) +
-  theme(legend.position = "none")
 ```
 
 # Sektorska dekompozicija
@@ -1233,56 +1391,87 @@ ggplot(heatmap_long, aes(x = yearmonth, y = sektor, fill = intenzitet)) +
 ```{r nowcasting}
 #| label: nowcasting
 
-# Pripremi podatke za model
-model_data <- analysis[!is.na(ind_prod_yoy) & !is.na(SAI)]
+has_ind_prod <- "ind_prod_yoy" %in% names(analysis) && sum(!is.na(analysis$ind_prod_yoy)) > 20
 
-if(nrow(model_data) > 20) {
+model_comparison <- NULL
+
+if(has_ind_prod) {
+  # Pripremi podatke za model
+  model_data <- analysis[!is.na(ind_prod_yoy) & !is.na(SAI)]
   
-  # Model 1: AR(1) benchmark
-  model_ar1 <- lm(ind_prod_yoy ~ shift(ind_prod_yoy, 1), data = model_data)
-  
-  # Model 2: AR(1) + SAI
-  model_sai <- lm(ind_prod_yoy ~ shift(ind_prod_yoy, 1) + SAI, data = model_data)
-  
-  # Model 3: AR(1) + SCI
-  model_sci <- lm(ind_prod_yoy ~ shift(ind_prod_yoy, 1) + SCI, data = model_data)
-  
-  # Model 4: AR(1) + sektorski
-  sector_formula <- as.formula(paste(
-    "ind_prod_yoy ~ shift(ind_prod_yoy, 1) +",
-    "macro_industrija + macro_trgovina + macro_sentiment_poslovni"
-  ))
-  model_sector <- lm(sector_formula, data = model_data)
-  
-  # Usporedba modela
-  model_comparison <- data.table(
-    Model = c("AR(1) benchmark",
-              "AR(1) + SAI",
-              "AR(1) + SCI",
-              "AR(1) + Sektorski"),
-    R2 = c(
-      round(summary(model_ar1)$r.squared, 3),
-      round(summary(model_sai)$r.squared, 3),
-      round(summary(model_sci)$r.squared, 3),
-      round(summary(model_sector)$r.squared, 3)
-    ),
-    Adj_R2 = c(
-      round(summary(model_ar1)$adj.r.squared, 3),
-      round(summary(model_sai)$adj.r.squared, 3),
-      round(summary(model_sci)$adj.r.squared, 3),
-      round(summary(model_sector)$adj.r.squared, 3)
-    ),
-    AIC = c(
-      round(AIC(model_ar1), 1),
-      round(AIC(model_sai), 1),
-      round(AIC(model_sci), 1),
-      round(AIC(model_sector), 1)
-    )
-  )
-  
-  kable(model_comparison, caption = "Usporedba nowcasting modela za industrijsku proizvodnju") %>%
-    kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
-    row_spec(which.min(model_comparison$AIC), bold = TRUE, background = pal$success)
+  if(nrow(model_data) > 20) {
+    
+    # Model 1: AR(1) benchmark
+    model_ar1 <- lm(ind_prod_yoy ~ shift(ind_prod_yoy, 1), data = model_data)
+    
+    # Model 2: AR(1) + SAI
+    model_sai <- lm(ind_prod_yoy ~ shift(ind_prod_yoy, 1) + SAI, data = model_data)
+    
+    # Model 3: AR(1) + SCI
+    model_sci <- lm(ind_prod_yoy ~ shift(ind_prod_yoy, 1) + SCI, data = model_data)
+    
+    # Model 4: AR(1) + sektorski (samo ako postojne potrebne varijable)
+    sector_vars <- c("macro_industrija", "macro_trgovina", "macro_sentiment_poslovni")
+    available_sector_vars <- sector_vars[sector_vars %in% names(model_data)]
+    
+    if(length(available_sector_vars) > 0) {
+      sector_formula <- as.formula(paste(
+        "ind_prod_yoy ~ shift(ind_prod_yoy, 1) +",
+        paste(available_sector_vars, collapse = " + ")
+      ))
+      model_sector <- lm(sector_formula, data = model_data)
+      
+      model_comparison <- data.table(
+        Model = c("AR(1) benchmark",
+                  "AR(1) + SAI",
+                  "AR(1) + SCI",
+                  "AR(1) + Sektorski"),
+        R2 = c(
+          round(summary(model_ar1)$r.squared, 3),
+          round(summary(model_sai)$r.squared, 3),
+          round(summary(model_sci)$r.squared, 3),
+          round(summary(model_sector)$r.squared, 3)
+        ),
+        Adj_R2 = c(
+          round(summary(model_ar1)$adj.r.squared, 3),
+          round(summary(model_sai)$adj.r.squared, 3),
+          round(summary(model_sci)$adj.r.squared, 3),
+          round(summary(model_sector)$adj.r.squared, 3)
+        ),
+        AIC = c(
+          round(AIC(model_ar1), 1),
+          round(AIC(model_sai), 1),
+          round(AIC(model_sci), 1),
+          round(AIC(model_sector), 1)
+        )
+      )
+    } else {
+      model_comparison <- data.table(
+        Model = c("AR(1) benchmark", "AR(1) + SAI", "AR(1) + SCI"),
+        R2 = c(
+          round(summary(model_ar1)$r.squared, 3),
+          round(summary(model_sai)$r.squared, 3),
+          round(summary(model_sci)$r.squared, 3)
+        ),
+        Adj_R2 = c(
+          round(summary(model_ar1)$adj.r.squared, 3),
+          round(summary(model_sai)$adj.r.squared, 3),
+          round(summary(model_sci)$adj.r.squared, 3)
+        ),
+        AIC = c(
+          round(AIC(model_ar1), 1),
+          round(AIC(model_sai), 1),
+          round(AIC(model_sci), 1)
+        )
+      )
+    }
+    
+    kable(model_comparison, caption = "Usporedba nowcasting modela za industrijsku proizvodnju") %>%
+      kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
+      row_spec(which.min(model_comparison$AIC), bold = TRUE, background = pal$success)
+  }
+} else {
+  message("Eurostat podaci nisu dostupni za nowcasting model")
 }
 ```
 
@@ -1293,22 +1482,35 @@ if(nrow(model_data) > 20) {
 #| fig-cap: "Nowcasting: Fitted vs Actual"
 #| fig-height: 7
 
-if(exists("model_sai") && exists("model_sector")) {
+if(exists("model_sai") && exists("model_data") && nrow(model_data) > 0) {
   
   model_data[, fitted_ar1 := predict(model_ar1, newdata = model_data)]
   model_data[, fitted_sai := predict(model_sai, newdata = model_data)]
-  model_data[, fitted_sector := predict(model_sector, newdata = model_data)]
   
-  nowcast_long <- melt(
-    model_data[, .(yearmonth, 
-                   Actual = ind_prod_yoy,
-                   `AR(1)` = fitted_ar1,
-                   `AR(1) + SAI` = fitted_sai,
-                   `AR(1) + Sektorski` = fitted_sector)],
-    id.vars = "yearmonth",
-    variable.name = "model",
-    value.name = "vrijednost"
-  )
+  if(exists("model_sector")) {
+    model_data[, fitted_sector := predict(model_sector, newdata = model_data)]
+    
+    nowcast_long <- melt(
+      model_data[, .(yearmonth, 
+                     Actual = ind_prod_yoy,
+                     `AR(1)` = fitted_ar1,
+                     `AR(1) + SAI` = fitted_sai,
+                     `AR(1) + Sektorski` = fitted_sector)],
+      id.vars = "yearmonth",
+      variable.name = "model",
+      value.name = "vrijednost"
+    )
+  } else {
+    nowcast_long <- melt(
+      model_data[, .(yearmonth, 
+                     Actual = ind_prod_yoy,
+                     `AR(1)` = fitted_ar1,
+                     `AR(1) + SAI` = fitted_sai)],
+      id.vars = "yearmonth",
+      variable.name = "model",
+      value.name = "vrijednost"
+    )
+  }
   
   ggplot(nowcast_long, aes(x = yearmonth, y = vrijednost, color = model)) +
     geom_line(linewidth = 1) +
@@ -1327,6 +1529,10 @@ if(exists("model_sai") && exists("model_sector")) {
       color = "Model"
     ) +
     theme(legend.position = "bottom")
+} else {
+  ggplot() +
+    annotate("text", x = 0.5, y = 0.5, label = "Eurostat podaci nisu dostupni za nowcasting vizualizaciju") +
+    theme_void()
 }
 ```
 
@@ -1348,7 +1554,7 @@ analysis[, SCI_momentum := SCI - shift(SCI, 3)]
 # Akceleracija
 analysis[, SAI_accel := SAI_velocity - shift(SAI_velocity, 1)]
 
-p_vel <- ggplot(analysis, aes(x = yearmonth)) +
+p_vel <- ggplot(analysis[!is.na(SAI_velocity)], aes(x = yearmonth)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = pal$muted) +
   geom_line(aes(y = SAI_velocity, color = "SAI"), linewidth = 1) +
   geom_line(aes(y = SCI_velocity, color = "SCI"), linewidth = 1) +
@@ -1356,13 +1562,13 @@ p_vel <- ggplot(analysis, aes(x = yearmonth)) +
   labs(title = "Semantička brzina (M/M promjena)", x = NULL, y = "Promjena", color = NULL) +
   theme(legend.position = "bottom")
 
-p_mom <- ggplot(analysis, aes(x = yearmonth)) +
+p_mom <- ggplot(analysis[!is.na(SAI_momentum)], aes(x = yearmonth)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = pal$muted) +
   geom_area(aes(y = SAI_momentum), fill = pal$cool, alpha = 0.3) +
   geom_line(aes(y = SAI_momentum), color = pal$primary, linewidth = 1) +
   labs(title = "Semantički momentum (3M promjena)", x = NULL, y = "Promjena")
 
-p_accel <- ggplot(analysis, aes(x = yearmonth)) +
+p_accel <- ggplot(analysis[!is.na(SAI_accel)], aes(x = yearmonth)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = pal$muted) +
   geom_col(aes(y = SAI_accel, fill = SAI_accel > 0), alpha = 0.7) +
   scale_fill_manual(values = c("TRUE" = pal$success, "FALSE" = pal$highlight)) +
@@ -1377,42 +1583,52 @@ p_vel / p_mom / p_accel
 ```{r granger-test}
 #| label: granger-test
 
-complete_data <- analysis[!is.na(SAI) & !is.na(ind_prod_yoy)]
+has_ind_prod <- "ind_prod_yoy" %in% names(analysis) && sum(!is.na(analysis$ind_prod_yoy)) > 30
 
-if(nrow(complete_data) > 30) {
+granger_results <- NULL
+
+if(has_ind_prod) {
+  complete_data <- analysis[!is.na(SAI) & !is.na(ind_prod_yoy)]
   
-  # Test: SAI -> Industrijska proizvodnja?
-  granger_sai_ind <- grangertest(ind_prod_yoy ~ SAI, order = 3, data = complete_data)
-  
-  # Test: Industrijska proizvodnja -> SAI?
-  granger_ind_sai <- grangertest(SAI ~ ind_prod_yoy, order = 3, data = complete_data)
-  
-  # Test: SCI -> Industrijska proizvodnja?
-  granger_sci_ind <- grangertest(ind_prod_yoy ~ SCI, order = 3, data = complete_data)
-  
-  granger_results <- data.table(
-    Test = c("SAI → Ind. proizvodnja", 
-             "Ind. proizvodnja → SAI",
-             "SCI → Ind. proizvodnja"),
-    F_statistika = c(
-      round(granger_sai_ind$F[2], 3),
-      round(granger_ind_sai$F[2], 3),
-      round(granger_sci_ind$F[2], 3)
-    ),
-    P_vrijednost = c(
-      round(granger_sai_ind$`Pr(>F)`[2], 4),
-      round(granger_ind_sai$`Pr(>F)`[2], 4),
-      round(granger_sci_ind$`Pr(>F)`[2], 4)
-    ),
-    Znacajno = c(
-      ifelse(granger_sai_ind$`Pr(>F)`[2] < 0.05, "Da", "Ne"),
-      ifelse(granger_ind_sai$`Pr(>F)`[2] < 0.05, "Da", "Ne"),
-      ifelse(granger_sci_ind$`Pr(>F)`[2] < 0.05, "Da", "Ne")
+  if(nrow(complete_data) > 30) {
+    
+    # Test: SAI -> Industrijska proizvodnja?
+    granger_sai_ind <- grangertest(ind_prod_yoy ~ SAI, order = 3, data = complete_data)
+    
+    # Test: Industrijska proizvodnja -> SAI?
+    granger_ind_sai <- grangertest(SAI ~ ind_prod_yoy, order = 3, data = complete_data)
+    
+    # Test: SCI -> Industrijska proizvodnja?
+    granger_sci_ind <- grangertest(ind_prod_yoy ~ SCI, order = 3, data = complete_data)
+    
+    granger_results <- data.table(
+      Test = c("SAI → Ind. proizvodnja", 
+               "Ind. proizvodnja → SAI",
+               "SCI → Ind. proizvodnja"),
+      F_statistika = c(
+        round(granger_sai_ind$F[2], 3),
+        round(granger_ind_sai$F[2], 3),
+        round(granger_sci_ind$F[2], 3)
+      ),
+      P_vrijednost = c(
+        round(granger_sai_ind$`Pr(>F)`[2], 4),
+        round(granger_ind_sai$`Pr(>F)`[2], 4),
+        round(granger_sci_ind$`Pr(>F)`[2], 4)
+      ),
+      Znacajno = c(
+        ifelse(granger_sai_ind$`Pr(>F)`[2] < 0.05, "Da", "Ne"),
+        ifelse(granger_ind_sai$`Pr(>F)`[2] < 0.05, "Da", "Ne"),
+        ifelse(granger_sci_ind$`Pr(>F)`[2] < 0.05, "Da", "Ne")
+      )
     )
-  )
-  
-  kable(granger_results, caption = "Granger uzročnost (lag = 3 mjeseca)") %>%
-    kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+    
+    kable(granger_results, caption = "Granger uzročnost (lag = 3 mjeseca)") %>%
+      kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+  } else {
+    message("Nedovoljno podataka za Granger test")
+  }
+} else {
+  message("Eurostat podaci nisu dostupni za Granger test")
 }
 ```
 
@@ -1425,18 +1641,17 @@ wb <- createWorkbook()
 
 # Sheet 1: Glavni podaci
 addWorksheet(wb, "Glavni_podaci")
-export_main <- analysis[, .(
-  Datum = yearmonth,
-  Broj_clanaka = N,
-  SAI, WSI, PCI, SCI, GDI,
-  Ind_proizvodnja = ind_prod_yoy,
-  Gradevinarstvo = construction_yoy,
-  Maloprodaja = retail_yoy,
-  ESI = esi,
-  BDP = gdp_yoy,
-  SAI_brzina = SAI_velocity,
-  SAI_momentum = SAI_momentum
-)]
+
+# Pripremi export s dostupnim stupcima
+export_cols <- c("yearmonth", "N", "SAI", "WSI", "PCI", "SCI", "GDI",
+                 "SAI_velocity", "SAI_momentum")
+optional_cols <- c("ind_prod_yoy", "construction_yoy", "retail_yoy", "esi", "gdp_yoy")
+available_optional <- optional_cols[optional_cols %in% names(analysis)]
+export_cols <- c(export_cols, available_optional)
+export_cols <- export_cols[export_cols %in% names(analysis)]
+
+export_main <- analysis[, .SD, .SDcols = export_cols]
+names(export_main)[1] <- "Datum"
 writeData(wb, "Glavni_podaci", export_main)
 
 # Sheet 2: Sektorske kategorije
@@ -1446,14 +1661,16 @@ names(export_sectors) <- c("Datum", gsub("macro_", "", macro_cols))
 writeData(wb, "Sektori", export_sectors)
 
 # Sheet 3: Performanse
-if(exists("performance_results")) {
+if(exists("performance_results") && nrow(performance_results) > 0) {
   addWorksheet(wb, "Performanse")
   writeData(wb, "Performanse", performance_results)
 }
 
 # Sheet 4: Lag analiza
-addWorksheet(wb, "Lag_analiza")
-writeData(wb, "Lag_analiza", lag_results)
+if(exists("lag_results") && nrow(lag_results) > 0) {
+  addWorksheet(wb, "Lag_analiza")
+  writeData(wb, "Lag_analiza", lag_results)
+}
 
 # Sheet 5: Korelacije
 addWorksheet(wb, "Korelacije")
@@ -1468,8 +1685,18 @@ header_style <- createStyle(
 )
 
 for(sheet in names(wb)) {
-  addStyle(wb, sheet, header_style, rows = 1, cols = 1:30, gridExpand = TRUE)
-  setColWidths(wb, sheet, cols = 1:30, widths = "auto")
+  ncols <- ncol(switch(sheet,
+    "Glavni_podaci" = export_main,
+    "Sektori" = export_sectors,
+    "Performanse" = if(exists("performance_results")) performance_results else data.table(),
+    "Lag_analiza" = if(exists("lag_results")) lag_results else data.table(),
+    "Korelacije" = cat_correlations,
+    data.table()
+  ))
+  if(ncols > 0) {
+    addStyle(wb, sheet, header_style, rows = 1, cols = 1:ncols, gridExpand = TRUE)
+    setColWidths(wb, sheet, cols = 1:ncols, widths = "auto")
+  }
 }
 
 output_path <- here("output", "semantic_activity_research.xlsx")
@@ -1485,16 +1712,34 @@ message("Excel exportiran: ", output_path)
 ```{r summary}
 #| label: summary
 
-# Nađi najbolje performanse
-best_index <- best_per_index[which.max(Korelacija)]
-best_leading <- leading_indicators[1]
+# Nađi najbolje performanse ako postoje
+best_index_name <- "SAI"
+best_index_cor <- NA
+best_leading_cat <- "N/A"
+best_leading_lag <- "N/A"
+r2_improvement <- "N/A"
+
+if(exists("best_per_index") && nrow(best_per_index) > 0 && !all(is.na(best_per_index$Korelacija))) {
+  best_row <- best_per_index[which.max(Korelacija)]
+  best_index_name <- best_row$Indeks
+  best_index_cor <- best_row$Korelacija
+}
+
+if(exists("leading_indicators") && nrow(leading_indicators) > 0) {
+  best_leading_cat <- leading_indicators[1, Semanticka_kategorija]
+  best_leading_lag <- paste0(abs(leading_indicators[1, Optimalni_lag]), " mjeseca")
+}
+
+if(exists("model_comparison") && !is.null(model_comparison) && nrow(model_comparison) > 1) {
+  r2_improvement <- paste0(round((max(model_comparison$R2[-1]) - model_comparison$R2[1]) * 100, 1), " pp")
+}
 
 summary_findings <- data.table(
   Nalaz = c(
     "Broj analiziranih članaka",
     "Vremenski raspon",
     "Najbolji semantički indeks",
-    "Korelacija s ind. proizvodnjom",
+    "Korelacija s referentnim pokazateljem",
     "Najbolji leading indikator",
     "Lead vrijeme",
     "Improvement R² vs AR(1)",
@@ -1504,13 +1749,11 @@ summary_findings <- data.table(
   Rezultat = c(
     format(nrow(dt), big.mark = ","),
     paste(format(date_min, "%m/%Y"), "-", format(date_max, "%m/%Y")),
-    best_index$Indeks,
-    as.character(best_index$Korelacija),
-    ifelse(nrow(leading_indicators) > 0, best_leading$Semanticka_kategorija, "N/A"),
-    ifelse(nrow(leading_indicators) > 0, paste0(abs(best_leading$Optimalni_lag), " mjeseca"), "N/A"),
-    ifelse(exists("model_comparison"), 
-           paste0(round((max(model_comparison$R2[-1]) - model_comparison$R2[1]) * 100, 1), " pp"),
-           "N/A"),
+    best_index_name,
+    ifelse(is.na(best_index_cor), "N/A", as.character(best_index_cor)),
+    best_leading_cat,
+    best_leading_lag,
+    r2_improvement,
     length(sem_cols),
     length(macro_cols)
   )

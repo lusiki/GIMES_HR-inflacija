@@ -1,0 +1,442 @@
+# ==============================================================================
+# ECONOMIC ACTIVITY ARTICLE FILTERING - MERGED PIPELINE
+# ==============================================================================
+
+library(data.table)
+library(stringi)
+
+# Set max threads
+setDTthreads(0)
+message("Using ", getDTthreads(), " threads")
+
+# ------------------------------------------------------------------------------
+# LOAD DATA
+# ------------------------------------------------------------------------------
+
+# message("\n=== LOADING DATA ===")
+# activity_articles <- readRDS("C:/Users/lsikic/Desktop/activity_articles.rds")
+# 
+if(!is.data.table(activity_articles)) {
+  setDT(activity_articles)
+}
+# message("Total articles loaded: ", format(nrow(activity_articles), big.mark = ","))
+
+# ------------------------------------------------------------------------------
+# FILTER 1: SOURCE TYPE - Keep only web
+# ------------------------------------------------------------------------------
+
+message("\n=== FILTER 1: SOURCE TYPE ===")
+dt <- activity_articles[SOURCE_TYPE == "web"]
+message("After web filter: ", format(nrow(dt), big.mark = ","))
+
+# ------------------------------------------------------------------------------
+# FILTER 2: RELEVANT NEWS PORTALS
+# ------------------------------------------------------------------------------
+
+message("\n=== FILTER 2: RELEVANT NEWS PORTALS ===")
+
+# Major national news portals
+national_news <- c(
+  "index.hr", "jutarnji.hr", "vecernji.hr", "24sata.hr", 
+  "tportal.hr", "dnevnik.hr", "net.hr", "rtl.hr", "hrt.hr",
+  "telegram.hr", "nacional.hr", "direktno.hr", "n1info.com", "n1info.hr",
+  "hina.hr", "novosti.hr"
+)
+
+# Business/Economic news (highly relevant for activity topic)
+business_news <- c(
+  "poslovni.hr", "seebiz.eu", "lidermedia.hr", "lider.media",
+  "bloombergadria.com", "hrportfolio.hr", "energypress.net",
+  "energetika-net.com", "jatrgovac.com", "gospodarski.hr",
+  "privredni.hr", "ictbusiness.info"
+)
+
+# Regional news portals
+regional_news <- c(
+  "slobodnadalmacija.hr", "dalmatinskiportal.hr", "dalmacijadanas.hr",
+  "dalmacijanews.hr", "antenazadar.hr", "zadarskilist.hr", "057info.hr",
+  "sibenik.in", "sibenskiportal.hr", "dulist.hr", "dubrovnikinsider.hr",
+  "dubrovnikportal.com", "dubrovnikpress.hr", "makarska-danas.com",
+  "kastela.org", "plavakamenica.hr",
+  "glasistre.hr", "novilist.hr", "istra24.hr", "istrain.hr",
+  "rijekadanas.com", "istarski.hr", "porestina.info",
+  "glas-slavonije.hr", "icv.hr", "034portal.hr", "035portal.hr",
+  "slavonijainfo.com", "brodportal.hr", "ebrod.net", "epodravina.hr",
+  "podravski.hr", "glaspodravine.hr", "pozeska-kronika.hr", "pozega.eu",
+  "pozeski.hr",
+  "zagreb.info", "01portal.hr", "prigorski.hr",
+  "varazdinske-vijesti.hr", "sjever.hr", "medjimurjepress.net",
+  "medjimurski.hr", "zagorje.com", "zagorje-international.hr",
+  "vzaktualno.hr", "evarazdin.hr", "muralist.hr", "drava.info",
+  "sjeverni.info",
+  "karlovacki.hr", "radio-banovina.hr", "likaclub.eu", "044portal.hr",
+  "radiokrizevci.hr", "bjelovar.live", "mnovine.hr"
+)
+
+# Specialized news
+specialized_news <- c(
+  "agroklub.com", "mirovina.hr", "legalis.hr", "srednja.hr",
+  "studentski.hr", "gov.hr", "fino.hr", "gradnja.org",
+  "graditeljstvo.hr", "profitiraj.hr"
+)
+
+# Opinion/Analysis portals
+opinion_portals <- c(
+  "7dnevno.hr", "dnevno.hr", "hrvatska-danas.com", "otvoreno.hr",
+  "narod.hr", "glas.hr", "novine.hr", "priznajem.hr", "kamenjar.com",
+  "politikaplus.com", "maxportal.hr", "novo.hr", "logicno.com",
+  "totalinfo.hr", "geopolitika.news", "nacionalno.hr", "portalnovosti.com",
+  "liberoportal.hr", "hrvatski-fokus.hr", "objektivno.hr", "stvarnost.hr",
+  "tockanai.hr", "suvremena.hr", "cronika.hr", "hrv.hr"
+)
+
+relevant_sources <- unique(c(national_news, business_news, regional_news, 
+                             specialized_news, opinion_portals))
+
+dt <- dt[FROM %in% relevant_sources]
+message("After source filter: ", format(nrow(dt), big.mark = ","))
+
+# Add source category
+dt[, source_category := fcase(
+  FROM %in% national_news, "national",
+  FROM %in% business_news, "business",
+  FROM %in% regional_news, "regional",
+  FROM %in% specialized_news, "specialized",
+  FROM %in% opinion_portals, "opinion",
+  default = "other"
+)]
+
+cat("\nBy category:\n")
+print(dt[, .N, by = source_category][order(-N)])
+
+# ------------------------------------------------------------------------------
+# FILTER 3: MINIMUM TEXT LENGTH
+# ------------------------------------------------------------------------------
+
+message("\n=== FILTER 3: TEXT LENGTH ===")
+dt[, text_length := nchar(FULL_TEXT)]
+dt <- dt[text_length >= 500]
+message("After length filter (>=500 chars): ", format(nrow(dt), big.mark = ","))
+
+# ------------------------------------------------------------------------------
+# FILTER 4: TITLE MUST CONTAIN ACTIVITY-RELATED TERM
+# ------------------------------------------------------------------------------
+
+message("\n=== FILTER 4: TITLE RELEVANCE ===")
+
+title_pattern <- paste0(
+  "(",
+  # GDP
+  "\\bBDP\\b|bruto doma[cć]i proizvod|",
+  
+  # Growth/Decline
+  "gospodar.*rast|rast.*gospodar|ekonomsk.*rast|",
+  "gospodar.*pad|pad.*gospodar|",
+  "recesij|stagnacij|oporavak gospodar|",
+  
+  # Industrial
+  "industrijska proizvodnj|prera[dđ]iva[cč]ka industrij|",
+  "proizvodni sektor|industrijski sektor|",
+  
+  # Construction
+  "gra[dđ]evinarstv|gra[dđ]evinski sektor|",
+  
+  # Tourism (economic framing)
+  "turisti[cč]ki (promet|prihod|rezultat|sektor)|",
+  "turisti[cč]ka sezona|broj turista|no[cć]enja|",
+  
+  # Trade
+  "izvoz|uvoz|vanjska trgovin|trgovinska bilanca|",
+  "robna razmjena|",
+  
+  # Sectors
+  "energetski sektor|IT sektor|poljoprivred|",
+  "financijski sektor|bankarsk|",
+  
+  # Statistics
+  "\\bDZS\\b|Eurostat|\\bHNB\\b|\\bHGK\\b|",
+  "kvartaln.*podaci|sezonski prilag|me[dđ]ugodi[sš]nj|",
+  
+  # Investment
+  "investicij|ulaganj|FDI|strana ulaganja|",
+  
+  # Business indicators
+  "poslovno povjerenje|indeks povjerenja|",
+  "maloprodaj.*promet|promet u trgovini",
+  ")"
+)
+
+dt[, title_relevant := stri_detect_regex(TITLE, title_pattern, case_insensitive = TRUE)]
+dt <- dt[title_relevant == TRUE]
+message("After title filter: ", format(nrow(dt), big.mark = ","))
+
+# ------------------------------------------------------------------------------
+# FILTER 5: CORE ACTIVITY TERM IN TEXT
+# ------------------------------------------------------------------------------
+
+message("\n=== FILTER 5: CORE TERM VERIFICATION ===")
+
+core_pattern <- paste0(
+  "(",
+  # GDP (all inflections)
+  "\\bBDP-?[aeu]?\\b|bruto doma[cć][ie]g? proizvod|",
+  
+  # Economic growth/decline phrases
+  "(gospodars[aeikou]+|ekonoms[aeikou]+) (rast|pad|oporavak|usporavanj)|",
+  "(rast|pad|stagnacij|oporavak) gospodar|",
+  "stop[aeu]? rasta|negativan rast|",
+  
+  # Industrial production
+  "industrijske? proizvodnj[aeiou]?|",
+  "prera[dđ]iva[cč]k[aeiou]+ industrij|",
+  "proizvodni sektor|",
+  
+  # Recession/contraction
+  "recesij[aeiou]?|",
+  "kontrakcij[aeiou]+ gospodar|",
+  
+  # Construction
+  "gra[dđ]evins[aeikou]+ (aktivnost|sektor)|",
+  "gra[dđ]evinarstv[aou]+|",
+  
+  # Tourism economic
+  "turisti[cč]k[aeiou]+ (promet|prihod|rezultat)|",
+  "broj (dolazaka|no[cć]enja)|",
+  "(dolasci|no[cć]enja) turist|",
+  
+  # Trade
+  "vanjsk[aeiou]+ trgovin|",
+  "trgovins[aeikou]+ (bilanca|deficit|suficit|saldo)|",
+  "robn[aeiou]+ razmjen|",
+  "(rast|pad) (izvoz|uvoz)|",
+  
+  # Value added
+  "bruto dodan[aeiou]+ vrijednost|",
+  
+  # Business indicators
+  "indeks (povjerenja|poslovn)|",
+  "poslovn[aeiou]+ (klim|o[cč]ekivanj)|",
+  
+  # Retail/consumption
+  "maloprodaj[aeiou]+ promet|",
+  "promet u trgovini|",
+  "osobn[aeiou]+ potro[sš]nj|",
+  
+  # Investment
+  "bruto investicij|",
+  "stran[aeiou]+ (ulaganj|investicij)|",
+  "\\bFDI\\b|",
+  
+  # Official statistics framing
+  "kvartaln[aeiou]+ (podaci|rast|pad|bdp)|",
+  "sezonski prilag|",
+  "me[dđ]ugodi[sš]nj|",
+  "na godi[sš]njoj razini",
+  ")"
+)
+
+dt[, has_core := stri_detect_regex(FULL_TEXT, core_pattern, case_insensitive = TRUE)]
+dt <- dt[has_core == TRUE]
+message("After core term filter: ", format(nrow(dt), big.mark = ","))
+
+# ------------------------------------------------------------------------------
+# FILTER 6: EXCLUSION CHECK
+# ------------------------------------------------------------------------------
+
+message("\n=== FILTER 6: EXCLUSION CHECK ===")
+
+excl_pattern <- paste0(
+  "(",
+  # Sports
+  "nogomet|ko[sš]ark|rukomet|tenis|vaterpolo|",
+  "liga prvak|premijer lig|bundeslig|",
+  "utakmic|golova|igra[cč]|trener|mom[cč]ad|",
+  "Dinamo|Hajduk|UEFA|FIFA|NBA|olimpijsk|",
+  "sportski|reprezentacij|prvenstv|",
+  
+  # Entertainment
+  "glumac|glumic|redatelj|",
+  "koncert|festival|",
+  "pjeva[cč]|album|pjesm|",
+  "reality|showbiz|celebrity|",
+  
+  # Travel/Lifestyle (not economic tourism)
+  "pla[zž]a|kupanje|smje[sš]taj za odmor|",
+  "apartmani za najam|booking|airbnb|",
+  "destinacij[aeu]? za odmor|",
+  
+  # Other noise
+  "horoskop|astrolog|",
+  "vremenska prognoza|",
+  "tv program",
+  ")"
+)
+
+override_pattern <- paste0(
+  "(",
+  "\\bBDP\\b|bruto doma[cć]i proizvod|",
+  "\\bDZS\\b|\\bHNB\\b|\\bEurostat\\b|\\bHGK\\b|",
+  "industrijska proizvodnj|prera[dđ]iva[cč]ka industrij|",
+  "kvartaln[aeiou]+ (rast|pad|podaci)|",
+  "gospodar.*rast|gospodar.*pad|ekonomsk.*rast|",
+  "recesij|stagnacij|",
+  "sezonski prilag|me[dđ]ugodi[sš]nj|",
+  "bruto dodana vrijednost|",
+  "turisti[cč]ki promet|turisti[cč]ki prihod|",
+  "vanjska trgovin|trgovinska bilanca",
+  ")"
+)
+
+dt[, excl := stri_detect_regex(FULL_TEXT, excl_pattern, case_insensitive = TRUE)]
+dt[, override := stri_detect_regex(FULL_TEXT, override_pattern, case_insensitive = TRUE)]
+dt[, passes_exclusion := (!excl | override)]
+
+excluded_count <- sum(!dt$passes_exclusion)
+message("Excluded by sports/entertainment (without override): ", excluded_count)
+
+dt <- dt[passes_exclusion == TRUE]
+message("After exclusion filter: ", format(nrow(dt), big.mark = ","))
+
+# ------------------------------------------------------------------------------
+# FILTER 7: CROATIAN CONTEXT
+# ------------------------------------------------------------------------------
+
+message("\n=== FILTER 7: CROATIAN CONTEXT ===")
+
+croatian_pattern <- paste0(
+  "(",
+  # Country references
+  "\\bHrvatsk[aeiou]?[mj]?|\\bRH\\b|\\bHR\\b|",
+  
+  # Institutions
+  "\\bHNB\\b|\\bDZS\\b|\\bHGK\\b|\\bFINA\\b|",
+  "Vlad[aeiou] RH|Vlad[aeiou] Republike Hrvatske|",
+  "Hrvatska narodna banka|Dr[zž]avn[io] zavod za statistiku|",
+  "Hrvatska gospodarska komora|",
+  "Ministarstvo gospodar|Ministarstvo financij|",
+  
+  # Cities (major ones)
+  "Zagreb|Split|Rijeka|Osijek|Zadar|Pula|Slavonski Brod|",
+  "Karlovac|Vara[zž]din|[SŠ]ibenik|Dubrovnik|",
+  
+  # Currency/Economic terms
+  "\\beuro?[aeimu]?\\b.*\\bHrvatsk|Hrvatska.*\\beuro?[aeimu]?\\b|",
+  "\\bkun[aeiou]?[mj]?\\b|kunama|",
+  
+  # Regional
+  "\\bu nas\\b|kod nas|na[sš][aeiou]? tr[zž]i[sš]|hrvatsk[aeiou]? tr[zž]i[sš]|",
+  "doma[cć][aeiou]? tr[zž]i[sš]|doma[cć][aeiou]? gospodar|",
+  "hrvatsk[aeiou]? gospodar|hrvatsk[aeiou]? ekonomij|",
+  
+  # Comparative
+  "\\bEU prosjek|europski prosjek.*Hrvatska|Hrvatska.*europski prosjek|",
+  "regij[aeiou]? .* Hrvatska|Hrvatska .* regij",
+  ")"
+)
+
+dt[, croatian_context := stri_detect_regex(FULL_TEXT, croatian_pattern, case_insensitive = TRUE)]
+
+message("Articles WITH Croatian context: ", format(sum(dt$croatian_context), big.mark = ","))
+message("Articles WITHOUT Croatian context: ", format(sum(!dt$croatian_context), big.mark = ","))
+
+dt <- dt[croatian_context == TRUE]
+message("After Croatian context filter: ", format(nrow(dt), big.mark = ","))
+
+# ------------------------------------------------------------------------------
+# FINAL DATASET
+# ------------------------------------------------------------------------------
+
+message("\n", strrep("=", 80))
+message("FINAL RESULTS")
+message(strrep("=", 80))
+
+message("\nFinal article count: ", format(nrow(dt), big.mark = ","))
+
+message("\nBy source category:")
+print(dt[, .N, by = source_category][order(-N)])
+
+message("\nTop 15 sources:")
+print(head(sort(table(dt$FROM), decreasing = TRUE), 15))
+
+message("\nBy year:")
+dt[, year := format(as.Date(DATE), "%Y")]
+print(dt[, .N, by = year][order(year)])
+
+# ------------------------------------------------------------------------------
+# QUALITY CONTROL - SAMPLE TITLES
+# ------------------------------------------------------------------------------
+
+message("\n", strrep("=", 80))
+message("QUALITY CONTROL - 20 RANDOM TITLES")
+message(strrep("=", 80))
+
+set.seed(123)
+sample_idx <- sample(nrow(dt), min(20, nrow(dt)))
+
+for(i in seq_along(sample_idx)) {
+  idx <- sample_idx[i]
+  message(sprintf("%2d. [%s] %s", i, dt$FROM[idx], substr(dt$TITLE[idx], 1, 80)))
+}
+
+# ------------------------------------------------------------------------------
+# EXTRACT MATCHED WORDS FOR QC
+# ------------------------------------------------------------------------------
+
+message("\n=== EXTRACTING MATCHED TERMS ===")
+
+extract_words <- function(text, pattern) {
+  matches <- stri_extract_all_regex(text, pattern, case_insensitive = TRUE)
+  sapply(matches, function(x) paste(unique(na.omit(x)), collapse = "; "))
+}
+
+dt[, matched_terms := extract_words(FULL_TEXT, core_pattern)]
+
+# Word frequency
+message("\nTop 20 matched terms:")
+all_words <- unlist(stri_split_fixed(dt$matched_terms, "; "))
+all_words <- all_words[all_words != ""]
+all_words <- tolower(all_words)
+freq <- sort(table(all_words), decreasing = TRUE)
+print(head(freq, 20))
+
+# ------------------------------------------------------------------------------
+# SAVE
+# ------------------------------------------------------------------------------
+
+message("\n=== SAVING ===")
+
+# Select final columns
+dt_final <- dt[, .(
+  DATE, 
+  FROM,
+  URL,
+  TITLE, 
+  FULL_TEXT,
+  MENTION_SNIPPET,
+  SOURCE_TYPE,
+  AUTHOR,
+  source_category,
+  text_length,
+  matched_terms,
+  REACH,
+  INTERACTIONS
+)]
+
+# Save RDS
+write_path_rds <- "C:/Users/lsikic/Desktop/activity_filtered.rds"
+saveRDS(dt_final, write_path_rds)
+message("Saved RDS: ", write_path_rds)
+
+# Save Excel for QC
+library(openxlsx)
+write_path_xlsx <- "C:/Users/lsikic/Desktop/activity_filtered.xlsx"
+
+dt_excel <- copy(dt_final)
+message("Saving all ", format(nrow(dt_excel), big.mark = ","), " rows to Excel...")
+
+# Truncate FULL_TEXT for Excel (too large)
+dt_excel[, FULL_TEXT := substr(FULL_TEXT, 1, 500)]
+write.xlsx(dt_excel, write_path_xlsx, overwrite = TRUE)
+message("Saved Excel: ", write_path_xlsx)
+
+message("\n=== DONE ===")

@@ -218,6 +218,11 @@ message("\nDatabase connection closed")
 # SAVE
 # ------------------------------------------------------------------------------
 
-write_path <- "C:/Users/lsikic/Desktop/geopolitical_articles.rds"
-saveRDS(geopolitical_articles, write_path)
-message("Saved to: ", write_path)
+chunks <- split(geopolitical_articles, (seq_len(nrow(geopolitical_articles))-1) %/% (nrow(geopolitical_articles)/5))
+pb <- txtProgressBar(min = 0, max = length(chunks), style = 3)
+
+for(i in seq_along(chunks)) {
+  saveRDS(chunks[[i]], paste0("C:/Users/lsikic/Desktop/articles_part_", i, ".rds"))
+  setTxtProgressBar(pb, i)
+}
+close(pb)

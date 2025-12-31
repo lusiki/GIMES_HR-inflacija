@@ -1,0 +1,1338 @@
+---
+title: "Semantički indeks institucionalnog okruženja"
+subtitle: "Mjerenje kvalitete institucija kroz analizu medijskog diskursa"
+author: "GIMES Research"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 4
+    toc-location: left
+    number-sections: true
+    theme: cosmo
+    code-fold: true
+    code-summary: "Prikaži kod"
+    fig-width: 11
+    fig-height: 7
+    df-print: paged
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+lang: hr
+---
+
+```{r setup}
+#| label: setup
+#| include: false
+
+library(data.table)
+library(ggplot2)
+library(scales)
+library(lubridate)
+library(stringi)
+library(knitr)
+library(kableExtra)
+library(zoo)
+library(openxlsx)
+library(here)
+library(corrplot)
+library(patchwork)
+library(viridis)
+
+options(scipen = 999)
+theme_set(theme_minimal(base_size = 12))
+
+pal <- list(
+  dark = "#1a1a2e",
+  primary = "#16213e",
+  accent = "#0f3460",
+  highlight = "#e94560",
+  warm = "#f39c12",
+  cool = "#3498db",
+  success = "#27ae60",
+  muted = "#7f8c8d",
+  light = "#ecf0f1",
+  purple = "#9b59b6",
+  teal = "#1abc9c"
+)
+```
+
+# Uvod
+
+Ovaj dokument konstruira semantičke indekse kvalitete institucionalnog okruženja temeljene na analizi medijskog diskursa. Indeksi mjere percepciju korupcije, funkcioniranje pravosuđa, transparentnost vlasti i druge aspekte institucionalnog funkcioniranja.
+
+```{r load-data}
+#| label: load-data
+
+#dt <- as.data.table(read.xlsx(here("data", "institutions_filtered.xlsx")))
+dt <- as.data.table(read.xlsx("C:/Users/lsikic/Desktop/labor_filtered.xlsx"))
+
+if (is.numeric(dt$DATE)) {
+  dt[, DATE := as.Date(DATE, origin = "1899-12-30")]
+} else {
+  dt[, DATE := as.Date(DATE)]
+}
+
+if ("text_length" %in% names(dt)) dt[, text_length := as.numeric(text_length)]
+if ("REACH" %in% names(dt)) dt[, REACH := as.numeric(REACH)]
+
+dt[, `:=`(
+  date = DATE,
+  year = year(DATE),
+  month = month(DATE),
+  quarter = quarter(DATE),
+  yearmonth = floor_date(DATE, "month"),
+  yearquarter = floor_date(DATE, "quarter")
+)]
+
+date_min <- min(dt$date, na.rm = TRUE)
+date_max <- max(dt$date, na.rm = TRUE)
+
+cat("Učitano", nrow(dt), "članaka\n")
+cat("Vremenski raspon:", as.character(date_min), "do", as.character(date_max), "\n")
+```
+
+# Eksploratorni pregled
+
+```{r basic-stats}
+#| label: basic-stats
+
+stats_summary <- data.table(
+  Metrika = c(
+    "Ukupan broj članaka",
+    "Vremenski raspon",
+    "Broj dana",
+    "Prosječno članaka dnevno",
+    "Broj izvora",
+    "Medijan duljine članka"
+  ),
+  Vrijednost = c(
+    format(nrow(dt), big.mark = ","),
+    paste(format(date_min, "%d.%m.%Y"), "do", format(date_max, "%d.%m.%Y")),
+    as.character(as.numeric(date_max - date_min)),
+    round(nrow(dt) / as.numeric(date_max - date_min), 2),
+    length(unique(dt$FROM)),
+    format(median(dt$text_length, na.rm = TRUE), big.mark = ",")
+  )
+)
+
+kable(stats_summary, caption = "Osnovne statistike dataseta") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r source-distribution}
+#| label: source-distribution
+#| fig-cap: "Top 20 izvora po broju članaka"
+
+top_sources <- dt[, .(N = .N), by = FROM][order(-N)][1:20]
+
+ggplot(top_sources, aes(x = reorder(FROM, N), y = N)) +
+  geom_col(fill = pal$primary, alpha = 0.8) +
+  geom_text(aes(label = format(N, big.mark = ",")), hjust = -0.1, size = 3) +
+  coord_flip() +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(title = "Top 20 izvora po broju članaka", x = NULL, y = "Broj članaka") +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+```{r source-category-distribution}
+#| label: source-category-distribution
+#| fig-cap: "Distribucija po kategorijama izvora"
+
+if ("source_category" %in% names(dt)) {
+  cat_dist <- dt[, .(N = .N), by = source_category][order(-N)]
+  
+  ggplot(cat_dist, aes(x = reorder(source_category, N), y = N)) +
+    geom_col(fill = pal$accent, alpha = 0.8) +
+    geom_text(aes(label = format(N, big.mark = ",")), hjust = -0.1, size = 3.5) +
+    coord_flip() +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+    labs(title = "Distribucija po kategorijama izvora", x = NULL, y = "Broj članaka") +
+    theme(plot.title = element_text(face = "bold"))
+}
+```
+
+```{r time-distribution}
+#| label: time-distribution
+#| fig-cap: "Mjesečni broj članaka"
+#| fig-height: 6
+
+monthly_count <- dt[, .(N = .N), by = yearmonth][order(yearmonth)]
+monthly_count[, MA3 := frollmean(N, n = 3, align = "center")]
+
+ggplot(monthly_count, aes(x = yearmonth)) +
+  geom_col(aes(y = N), fill = pal$light, alpha = 0.7) +
+  geom_line(aes(y = MA3), color = pal$highlight, linewidth = 1.2, na.rm = TRUE) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(
+    title = "Mjesečni broj članaka o institucijama",
+    subtitle = "Crvena linija = 3 mjesečni klizni prosjek",
+    x = NULL, y = "Broj članaka"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+# Semantička taksonomija
+
+## Hijerarhijska struktura pojmova
+
+```{r semantic-taxonomy}
+#| label: semantic-taxonomy
+
+institutions_taxonomy <- list(
+  
+  # === 1. KORUPCIJA I KRIMINAL ===
+  korupcija = list(
+    opca_korupcija = c(
+      "korupcij[aeiou]?", "koruptiv[aeiou]+", "korumpira[noti]+",
+      "mito", "podmićivanj[aeu]?", "potkupljivanj[aeu]?",
+      "pronevjer[aeiou]?", "malverzacij[aeiou]?"
+    ),
+    trgovina_utjecajem = c(
+      "trgovanj[aeu]?.{0,10}utjecaj", "zlouporab[aeiou]?.{0,10}polo[zž]aj",
+      "zlouporab[aeiou]?.{0,10}ovlast", "pogodovanj[aeu]?",
+      "nepotizam", "kronizam", "klijentelizam"
+    ),
+    pranje_novca = c(
+      "pranj[aeu]?.{0,10}novca", "pranje.{0,10}para",
+      "sumnjiv[aeiou]+.{0,10}transakcij", "offshore",
+      "porezn[aeiou]+.{0,10}utaj[aeiou]?", "porezn[aeiou]+.{0,10}evazij"
+    ),
+    organizirani_kriminal = c(
+      "organiziran[aeiou]+.{0,10}kriminal", "kriminaln[aeiou]+.{0,10}organizacij",
+      "mafij[aeiou]?", "klan[aeiou]?", "podzemlje"
+    ),
+    afere = c(
+      "afer[aeiou]?", "skandal[aeiou]?", "slu[cč]aj[aeiou]?",
+      "ist[ei]?rag[aeiou]?", "istraga"
+    )
+  ),
+  
+  # === 2. PRAVOSUĐE ===
+  pravosude = list(
+    sudovi = c(
+      "sud[aou]?\\b", "sudov[aeiou]?", "sudsk[aeiou]+",
+      "\\bVrhovn[aeiou]+.{0,5}sud", "\\b[Žž]upanijsk[aeiou]+.{0,5}sud",
+      "\\bOpćinsk[aeiou]+.{0,5}sud", "\\bUstavn[aeiou]+.{0,5}sud",
+      "\\bTrgovačk[aeiou]+.{0,5}sud", "\\bUprav[aeiou]+.{0,5}sud"
+    ),
+    postupci = c(
+      "sudsk[aeiou]+.{0,10}postup[aeikou]+", "kazneni.{0,10}postup[aeikou]+",
+      "parnični.{0,10}postup[aeikou]+", "procesui[rn]+",
+      "sudjelova[ntoi]+.{0,10}postup"
+    ),
+    presude = c(
+      "presud[aeiou]?", "osu[dđ][aeiou]+", "oslobođen",
+      "pravomoćn[aeiou]+", "nepravomoćn[aeiou]+",
+      "prvostupanjsk[aeiou]+", "drugostupanjsk[aeiou]+"
+    ),
+    optuznice = c(
+      "optu[zž]nic[aeiou]?", "optu[zž]en[aeiou]+",
+      "okrivljenik", "okrivljen[aeiou]+",
+      "osumnjičen[aeikou]+", "osumnjičenik"
+    ),
+    odvjetnistvo = c(
+      "\\bDORH\\b", "dr[zž]avno.{0,5}odvjetni[sš]tvo",
+      "\\bUSKOK\\b", "[zž]upanijsk[aeiou]+.{0,5}odvjetni[sš]tvo",
+      "tu[zž]itelj", "tu[zž]iteljstv[aou]?"
+    ),
+    efikasnost = c(
+      "duljin[aeiou]+.{0,10}postup", "trajanj[aeu]+.{0,10}postup",
+      "zaostal[aeiou]+.{0,10}predmet", "neriješen[aeiou]+.{0,10}predmet",
+      "sudsk[aeiou]+.{0,10}zaostatk", "pravo.{0,10}suđenj"
+    )
+  ),
+  
+  # === 3. IZVRŠNA VLAST ===
+  izvrsna_vlast = list(
+    vlada = c(
+      "\\bVlad[aeiou]?\\b", "vladin[aeiou]+", "kabinet[aeiou]?",
+      "premijer[aeiou]?", "predsjednik.{0,5}Vlade",
+      "Plenković", "ministar.{0,5}predsjednik"
+    ),
+    ministarstva = c(
+      "ministarstv[aou]?", "ministar[aeiou]?\\b",
+      "dr[zž]avn[aeiou]+.{0,10}tajnik", "pomo[cć]nik.{0,10}ministr"
+    ),
+    smjene_ostavke = c(
+      "smjen[aeiou]?", "smijeni[nto]+", "ostavk[aeiou]?",
+      "razrije[sš][ie]n[aeiou]+", "odstup[aeiou]+",
+      "povla[cč]enj[aeu]?", "opoziv"
+    ),
+    imenovanja = c(
+      "imenovanj[aeu]?", "imenova[noti]+",
+      "postavljenj[aeu]?", "izbor[aou]?.{0,10}ministr",
+      "priseg[aeiou]?"
+    ),
+    reforme = c(
+      "reform[aeiou]?", "restrukturiranj[aeu]?",
+      "reorganizacij[aeiou]?", "modernizacij[aeiou]+.{0,10}uprav"
+    )
+  ),
+  
+  # === 4. PARLAMENT ===
+  parlament = list(
+    sabor = c(
+      "\\bSabor[aou]?\\b", "saborsk[aeiou]+", "zastupnik[aeiou]?",
+      "parlament[aeiou]?", "parlamentar[aeiou]+",
+      "Hrvatski.{0,5}sabor"
+    ),
+    zakonodavstvo = c(
+      "zakon[aou]?\\b", "zakonsk[aeiou]+", "zakonodav[aeiou]+",
+      "nacrt.{0,5}zakon", "prijedlog.{0,5}zakon",
+      "izglasa[noti]+", "usvoj[ie][nto]+"
+    ),
+    odbori = c(
+      "saborsk[aeiou]+.{0,5}odbor", "odbor.{0,5}za",
+      "povjerenstvo", "radna.{0,5}tijel"
+    ),
+    rasprave = c(
+      "saborsk[aeiou]+.{0,10}rasprav", "sjednic[aeiou]+.{0,10}Sabor",
+      "aktualn[aeiou]+.{0,10}sat", "zastupni[cč]k[aeiou]+.{0,10}pitan"
+    ),
+    oporba = c(
+      "oporb[aeiou]?", "oporbeni[aeiou]+", "opozicij[aeiou]?",
+      "vladajuć[aeiou]+.{0,10}većin", "koalicij[aeiou]?"
+    )
+  ),
+  
+  # === 5. LOKALNA SAMOUPRAVA ===
+  lokalna_samouprava = list(
+    zupanija = c(
+      "[zž]upanij[aeiou]?", "[zž]upan[aeiou]?\\b", "[zž]upanijsk[aeiou]+",
+      "[zž]upanijsk[aeiou]+.{0,5}skupštin"
+    ),
+    gradovi = c(
+      "gradona[cč]elnik", "gradsk[aeiou]+.{0,10}vije[cć]",
+      "gradsk[aeiou]+.{0,10}uprav", "Grad[aou]?.{0,5}Zagreb"
+    ),
+    opcine = c(
+      "op[cć]in[aeiou]?", "na[cč]elnik", "op[cć]insk[aeiou]+.{0,5}vije[cć]"
+    ),
+    komunalni_poslovi = c(
+      "komunaln[aeiou]+.{0,10}poduze[cć]", "komunaln[aeiou]+.{0,10}uslug",
+      "javna.{0,5}nabav[aeiou]?", "koncesij[aeiou]?"
+    )
+  ),
+  
+  # === 6. KONTROLNE INSTITUCIJE ===
+  kontrolne_institucije = list(
+    revizija = c(
+      "dr[zž]avn[aeiou]+.{0,10}revizij", "revizorsk[aeiou]+.{0,10}izvje[sš][cć]",
+      "financijsk[aeiou]+.{0,10}revizij", "kontroln[aeiou]+.{0,10}izvje"
+    ),
+    povjerenstva = c(
+      "Povjerenstvo.{0,10}sukob.{0,10}interes",
+      "sukob.{0,10}interes[aeiou]?", "imovins[aeikou]+.{0,10}kartic",
+      "Povjerenstvo.{0,10}fiskalnj"
+    ),
+    pucki_pravobranitelj = c(
+      "pu[cč]k[aeiou]+.{0,10}pravobranitelj",
+      "ombudsman", "pravobranitelj"
+    ),
+    informacijski_povjerenik = c(
+      "povjerenik.{0,10}informiranj", "pristup.{0,10}informacij",
+      "AZOP", "za[sš]tit[aeiou]+.{0,10}osobn[aeiou]+.{0,10}podatak"
+    ),
+    antikorupcijska_tijela = c(
+      "\\bUSKOK\\b", "antikorupcij[aeiou]+", "borb[aeiou]+.{0,10}korupcij",
+      "\\bOLAF\\b", "\\bGRECO\\b"
+    )
+  ),
+  
+  # === 7. IZBORI I DEMOKRACIJA ===
+  izbori_demokracija = list(
+    izbori = c(
+      "izbor[aeiou]?\\b", "izbor[aeiou]+.{0,10}kampanj",
+      "parlamentarn[aeiou]+.{0,10}izbor", "lokaln[aeiou]+.{0,10}izbor",
+      "predsjedni[cč]k[aeiou]+.{0,10}izbor", "prijevremen[aeiou]+.{0,10}izbor"
+    ),
+    izborni_proces = c(
+      "izborn[aeiou]+.{0,10}komisij", "DIP", "Dr[zž]avn[aeiou]+.{0,10}izborno",
+      "biračk[aeiou]+.{0,10}pravo", "glasovanj[aeu]?",
+      "bira[cč]k[aeiou]+.{0,10}odbor"
+    ),
+    politicke_stranke = c(
+      "\\bHDZ\\b", "\\bSDP\\b", "\\bMOST\\b", "\\bMožemo\\b",
+      "\\bDP\\b", "\\bHSS\\b", "stranka", "stranačk[aeiou]+"
+    ),
+    kandidati = c(
+      "kandidat[aeiou]?", "kandidatur[aeiou]?", "predizborn[aeiou]+",
+      "nominacij[aeiou]?"
+    )
+  ),
+  
+  # === 8. TRANSPARENTNOST ===
+  transparentnost = list(
+    javnost_rada = c(
+      "transparent[aeiou]+", "transparentnost",
+      "javnost.{0,10}rad[aeiou]?", "otvoren[aeiou]+.{0,10}podatk"
+    ),
+    informiranje = c(
+      "pristup.{0,10}informacij", "pravo.{0,10}informiranj",
+      "slobod[aeiou]+.{0,10}informacij", "objav[aeiou]+.{0,10}podatak"
+    ),
+    tajnost = c(
+      "tajnost", "tajn[aeiou]+.{0,10}podatak", "klasificiran[aeiou]+",
+      "povjerljiv[aeiou]+", "prikrivanj[aeu]?"
+    ),
+    e_uprava = c(
+      "e.uprav[aeiou]?", "digitalizacij[aeiou]+.{0,10}uprav",
+      "elektroničk[aeiou]+.{0,10}uslug", "online.{0,10}uslug"
+    )
+  ),
+  
+  # === 9. JAVNA UPRAVA ===
+  javna_uprava = list(
+    drzavni_sluzbenici = c(
+      "dr[zž]avn[aeiou]+.{0,10}slu[zž]benik", "javna?.{0,10}slu[zž]b[aeiou]?",
+      "slu[zž]beni[cč]k[aeiou]+", "namještenj[aeikou]+"
+    ),
+    zaposljavanja = c(
+      "zapo[sš]ljavanj[aeu]+.{0,10}dr[zž]avn", "natje[cč]aj.{0,10}posao",
+      "primanj[aeu]+.{0,10}slu[zž]b", "podobn[aeiou]+.{0,10}kadr"
+    ),
+    agencije = c(
+      "agencij[aeiou]?", "zavod[aeiou]?", "direkcij[aeiou]?",
+      "\\bHZMO\\b", "\\bHZZO\\b", "\\bHZZ\\b", "\\bFINA\\b"
+    ),
+    birokratizacija = c(
+      "birokracij[aeiou]?", "birokratsk[aeiou]+", "administrativn[aeiou]+.{0,10}prepreka",
+      "papirologij[aeiou]?", "crvena?.{0,10}vrpca?"
+    )
+  ),
+  
+  # === 10. POLICIJA I SIGURNOST ===
+  policija_sigurnost = list(
+    policija = c(
+      "policij[aeiou]?", "policijsk[aeiou]+",
+      "\\bMUP\\b", "ministarstvo.{0,10}unutarnj",
+      "Bo[zž]inović"
+    ),
+    kriminalistika = c(
+      "kriminalisti[cč]k[aeiou]+.{0,10}istra[zž]ivanj",
+      "uhićen[aeiou]+", "privođenj[aeu]?", "pritvor[aeiou]?"
+    ),
+    sigurnosne_sluzbe = c(
+      "\\bSOA\\b", "sigurnosn[aeiou]+.{0,10}slu[zž]b",
+      "obavje[sš]tajn[aeiou]+", "\\bPNUSKOK\\b"
+    ),
+    javna_sigurnost = c(
+      "javn[aeiou]+.{0,10}sigurnost", "javni.{0,10}red",
+      "kriminalitet", "stopa.{0,10}kriminal"
+    )
+  ),
+  
+  # === 11. EU I MEĐUNARODNE INSTITUCIJE ===
+  eu_medjunarodno = list(
+    eu_institucije = c(
+      "Europsk[aeiou]+.{0,10}komisij", "\\bEK\\b",
+      "Europsk[aeiou]+.{0,10}parlament", "Vije[cć]e.{0,10}EU",
+      "Europsk[aeiou]+.{0,10}sud", "europsk[aeiou]+.{0,10}institucij"
+    ),
+    eu_evaluacije = c(
+      "izvje[sš][cć]e.{0,10}napretk", "europsk[aeiou]+.{0,10}semestar",
+      "preporuk[aeiou]+.{0,10}EU", "CVM", "mehanizam.{0,10}suradnj"
+    ),
+    medjunarodne_organizacije = c(
+      "\\bUN\\b", "Ujedinjeni.{0,10}narod", "\\bVije[cć]e.{0,10}Europ",
+      "\\bOECD\\b", "\\bMMF\\b", "Svjetska.{0,10}bank"
+    ),
+    diplomatski_odnosi = c(
+      "\\bMVEP\\b", "ministarstvo.{0,10}vanjsk",
+      "diplomat[aeiou]+", "veleposlanstv[aou]?", "konzulat"
+    )
+  ),
+  
+  # === 12. MEDIJI I JAVNI PROSTOR ===
+  mediji = list(
+    sloboda_medija = c(
+      "slobod[aeiou]+.{0,10}medij", "slobod[aeiou]+.{0,10}tisk",
+      "novinar[aeiou]+.{0,10}slobod", "cenzur[aeiou]?"
+    ),
+    javni_mediji = c(
+      "\\bHRT\\b", "Hrvatska?.{0,10}radiotelevizij",
+      "javn[aeiou]+.{0,10}medij", "\\bHINA\\b"
+    ),
+    dezinformacije = c(
+      "la[zž]n[aeiou]+.{0,10}vijest", "dezinformacij[aeiou]?",
+      "manipulacij[aeiou]?", "propagand[aeiou]?"
+    ),
+    medijski_pluralizam = c(
+      "medijsk[aeiou]+.{0,10}pluralizam", "vlasni[cč]k[aeiou]+.{0,10}struktur",
+      "koncentracij[aeiou]+.{0,10}medij"
+    )
+  )
+)
+
+flatten_taxonomy <- function(taxonomy) {
+  result <- list()
+  for (macro in names(taxonomy)) {
+    for (meso in names(taxonomy[[macro]])) {
+      key <- paste0(macro, "_", meso)
+      result[[key]] <- taxonomy[[macro]][[meso]]
+    }
+  }
+  result
+}
+
+flat_terms <- flatten_taxonomy(institutions_taxonomy)
+
+tax_summary <- rbindlist(lapply(names(institutions_taxonomy), function(macro) {
+  rbindlist(lapply(names(institutions_taxonomy[[macro]]), function(meso) {
+    data.table(
+      Makro_kategorija = macro,
+      Meso_kategorija = meso,
+      Broj_pojmova = length(institutions_taxonomy[[macro]][[meso]])
+    )
+  }))
+}))
+
+kable(tax_summary, caption = "Struktura semantičke taksonomije institucija") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Sentiment i kvaliteta leksikoni
+
+```{r sentiment-quality-lexicons}
+#| label: sentiment-quality-lexicons
+
+# Institucionalni sentiment leksikon
+institutional_sentiment <- list(
+  positive = c(
+    "transparentn", "učinkovit", "efikasan", "pošten", "integritet",
+    "nepristran", "neovis", "profesional", "odgovoran", "zakonit",
+    "pravedno", "demokratsk", "legitim", "reforma", "napredak",
+    "poboljšanj", "unaprijeđen", "oslobođen", "pravomoćno.{0,10}oslobođ",
+    "modernizacij", "digitalizacij", "pojednostavljenj", "ubrzanj",
+    "suradnja", "koordinacij", "uspješn"
+  ),
+  negative = c(
+    "korupcij", "korumpira", "kriminal", "nezakonit", "protuzakonit",
+    "nelegalan", "nepravilan", "nepošten", "pristran", "zlouporab",
+    "pronevjer", "malverzacij", "afera", "skandal", "optu[zž]",
+    "osu[dđ]", "uhićen", "pritvor", "smijeni", "ostavk",
+    "neučinkovit", "neefikasan", "birokratiziran", "netransparent",
+    "tajn[aeiou]+.{0,10}podatak", "sukob.{0,10}interes",
+    "pogodovanj", "nepotizam", "klijenteliz"
+  )
+)
+
+# Kvaliteta institucija leksikon
+quality_lexicon <- list(
+  high_quality = c(
+    "reformirano", "unaprijeđeno", "modernizirano", "digitalizirano",
+    "transparentno", "učinkovito", "brzo", "profesionalno",
+    "neovisno", "nepristrano", "pravedno", "zakonito",
+    "oslobađajuća", "pravomoćno", "efikasno"
+  ),
+  low_quality = c(
+    "korumpirano", "nefunkcionalno", "neučinkovito", "sporo",
+    "pristrano", "ovisno", "politizirano", "netransparentno",
+    "birokratizirano", "zastarjelo", "neorganizirano",
+    "kaotično", "zakrčeno", "blokirano", "paralizirano"
+  )
+)
+
+# Neizvjesnost leksikon za institucije
+institutional_uncertainty <- c(
+  "neizvjesn", "nesigurn", "upitno", "dvojbeno", "neriješeno",
+  "sporno", "kontroverzn", "problematičn", "rizično",
+  "nedefinirano", "nejasno", "nedorečeno", "nepredvidivo",
+  "nestabilno", "promjenjivo", "varira", "oscilira",
+  "možda", "eventualno", "ako", "ukoliko", "ovisi",
+  "čeka se", "odgođeno", "na čekanju", "u proceduri"
+)
+
+# Urgentnost i eskalacija leksikon
+urgency_lexicon <- c(
+  "hitno", "odmah", "žurno", "kritično", "alarmantno",
+  "dramatično", "ozbiljno", "zabrinjavajuće", "eskalira",
+  "pogoršava", "produbljuje", "intenzivira", "ubrzano",
+  "rekordno", "povijesno", "bez presedana"
+)
+
+# Politička polarizacija leksikon
+polarization_lexicon <- c(
+  "sukob", "sva[dđ]", "podjela", "polarizacij", "konfrontacij",
+  "napada", "optužuje", "proziva", "kritizira", "osporava",
+  "osudi", "demantira", "pobija", "negira", "odbacuje",
+  "lijevo", "desno", "konzervativ", "liberal", "ekstrem"
+)
+
+cat("Definirano", length(institutional_sentiment$positive), "pozitivnih i",
+    length(institutional_sentiment$negative), "negativnih institucionalnih pojmova\n")
+cat("Definirano", length(institutional_uncertainty), "pojmova neizvjesnosti\n")
+cat("Definirano", length(urgency_lexicon), "pojmova urgentnosti\n")
+cat("Definirano", length(polarization_lexicon), "pojmova polarizacije\n")
+```
+
+## Brojanje pojmova
+
+```{r count-terms}
+#| label: count-terms
+
+count_patterns <- function(text, patterns) {
+  if (is.na(text) || text == "") return(0)
+  text_lower <- tolower(text)
+  sum(sapply(patterns, function(p) {
+    tryCatch(stri_count_regex(text_lower, p), error = function(e) 0)
+  }))
+}
+
+# Broji sve kategorije iz taksonomije
+for (cat_name in names(flat_terms)) {
+  col_name <- paste0("sem_", cat_name)
+  dt[, (col_name) := sapply(FULL_TEXT, count_patterns, patterns = flat_terms[[cat_name]])]
+}
+
+# Agregatne mjere po makro kategorijama
+macro_categories <- unique(tax_summary$Makro_kategorija)
+
+for (macro in macro_categories) {
+  meso_cats <- tax_summary[Makro_kategorija == macro, Meso_kategorija]
+  col_names <- paste0("sem_", macro, "_", meso_cats)
+  existing_cols <- col_names[col_names %in% names(dt)]
+  if (length(existing_cols) > 0) {
+    dt[, paste0("macro_", macro) := rowSums(.SD, na.rm = TRUE), .SDcols = existing_cols]
+  }
+}
+
+# Institutional sentiment scoring
+dt[, inst_positive := sapply(FULL_TEXT, count_patterns, patterns = institutional_sentiment$positive)]
+dt[, inst_negative := sapply(FULL_TEXT, count_patterns, patterns = institutional_sentiment$negative)]
+dt[, inst_net := inst_positive - inst_negative]
+dt[, inst_ratio := fifelse(inst_positive + inst_negative > 0,
+                           (inst_positive - inst_negative) / (inst_positive + inst_negative), 0)]
+
+# Quality scoring
+dt[, quality_high := sapply(FULL_TEXT, count_patterns, patterns = quality_lexicon$high_quality)]
+dt[, quality_low := sapply(FULL_TEXT, count_patterns, patterns = quality_lexicon$low_quality)]
+dt[, quality_net := quality_high - quality_low]
+
+# Uncertainty scoring
+dt[, uncertainty := sapply(FULL_TEXT, count_patterns, patterns = institutional_uncertainty)]
+
+# Urgency scoring
+dt[, urgency := sapply(FULL_TEXT, count_patterns, patterns = urgency_lexicon)]
+
+# Polarization scoring
+dt[, polarization := sapply(FULL_TEXT, count_patterns, patterns = polarization_lexicon)]
+
+# Ukupni semantički score
+sem_cols <- names(dt)[grepl("^sem_", names(dt))]
+dt[, semantic_total := rowSums(.SD, na.rm = TRUE), .SDcols = sem_cols]
+
+cat("Izračunato", length(sem_cols), "semantičkih varijabli\n")
+```
+
+# Konstrukcija indeksa
+
+## Mjesečna agregacija
+
+```{r monthly-aggregation}
+#| label: monthly-aggregation
+
+macro_cols <- names(dt)[grepl("^macro_", names(dt))]
+sem_cols_all <- c(sem_cols, macro_cols, "semantic_total",
+                  "inst_positive", "inst_negative", "inst_net", "inst_ratio",
+                  "quality_high", "quality_low", "quality_net",
+                  "uncertainty", "urgency", "polarization")
+
+monthly <- dt[, c(
+  .(N = .N,
+    total_words = sum(text_length, na.rm = TRUE),
+    avg_length = mean(text_length, na.rm = TRUE),
+    unique_sources = uniqueN(FROM)),
+  lapply(.SD, sum, na.rm = TRUE),
+  lapply(.SD, mean, na.rm = TRUE) |> setNames(paste0(names(.SD), "_avg"))
+), by = yearmonth, .SDcols = sem_cols_all][order(yearmonth)]
+
+# Izračunaj dodatne mjere
+monthly[, articles_per_source := N / unique_sources]
+
+cat("Agregirano", nrow(monthly), "mjeseci podataka\n")
+```
+
+## TF IDF ponderiranje
+
+```{r tfidf-weights}
+#| label: tfidf-weights
+
+# Izračunaj IDF za svaku kategoriju
+calc_idf <- function(monthly_data, col_name) {
+  N <- nrow(monthly_data)
+  df <- sum(monthly_data[[col_name]] > 0, na.rm = TRUE)
+  if (df == 0) return(0)
+  log(N / df)
+}
+
+idf_weights <- sapply(macro_cols, function(col) calc_idf(monthly, col))
+idf_weights <- idf_weights / max(idf_weights, na.rm = TRUE)
+
+# TF-IDF ponderirani score za svaki mjesec
+for (col in macro_cols) {
+  tfidf_col <- paste0(col, "_tfidf")
+  monthly[, (tfidf_col) := (get(col) / total_words) * idf_weights[col] * 1000]
+}
+
+tfidf_cols <- paste0(macro_cols, "_tfidf")
+
+idf_table <- data.table(
+  Kategorija = gsub("macro_", "", macro_cols),
+  IDF_weight = round(idf_weights, 3)
+)[order(-IDF_weight)]
+
+kable(idf_table, caption = "IDF težine po kategorijama") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Definicija indeksa
+
+```{r construct-indices}
+#| label: construct-indices
+
+normalize_01 <- function(x) {
+  if (all(is.na(x))) return(rep(0.5, length(x)))
+  rng <- range(x, na.rm = TRUE)
+  if (rng[1] == rng[2]) return(rep(0.5, length(x)))
+  (x - rng[1]) / (rng[2] - rng[1])
+}
+
+standardize <- function(x) {
+  if (all(is.na(x))) return(rep(0, length(x)))
+  (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
+}
+
+# === INDEKS 1: Institutional Attention Index (IAI) ===
+# Ukupna medijska pozornost na institucije normalizirana po broju članaka
+monthly[, IAI := normalize_01(semantic_total / N) * 100]
+
+# === INDEKS 2: Corruption Perception Index (CPI) ===
+# Intenzitet medijskog izvještavanja o korupciji
+if ("macro_korupcija" %in% names(monthly)) {
+  monthly[, CPI := normalize_01(macro_korupcija / N) * 100]
+}
+
+# === INDEKS 3: Judicial Efficiency Index (JEI) ===
+# Fokus na pravosuđe ponderirano kvalitetom
+if ("macro_pravosude" %in% names(monthly)) {
+  monthly[, JEI := normalize_01(macro_pravosude / N) * 100]
+}
+
+# === INDEKS 4: Governance Quality Index (GQI) ===
+# Kombinacija izvršne vlasti i transparentnosti s neto sentimentom
+governance_cols <- c("macro_izvrsna_vlast", "macro_transparentnost", "macro_javna_uprava")
+governance_cols <- governance_cols[governance_cols %in% names(monthly)]
+if (length(governance_cols) > 0) {
+  monthly[, GQI := normalize_01(rowMeans(.SD, na.rm = TRUE) / N * (1 + inst_ratio_avg)) * 100,
+          .SDcols = governance_cols]
+}
+
+# === INDEKS 5: Institutional Sentiment Index (ISI) ===
+# Neto sentiment o institucijama
+monthly[, ISI := normalize_01(inst_ratio_avg + 1) * 100]
+
+# === INDEKS 6: Institutional Uncertainty Index (IUI) ===
+# Mjeri razinu neizvjesnosti u institucionalnom diskursu
+monthly[, IUI := normalize_01(uncertainty / N) * 100]
+
+# === INDEKS 7: Political Polarization Index (PPI) ===
+# Mjeri intenzitet političke polarizacije
+monthly[, PPI := normalize_01(polarization / N) * 100]
+
+# === INDEKS 8: Institutional Quality Composite (IQC) ===
+# Kompozitni indeks kvalitete temeljen na omjeru pozitivnih i negativnih signala
+monthly[, IQC := normalize_01((quality_high - quality_low) / (quality_high + quality_low + 1) + 1) * 100]
+
+# === INDEKS 9: Urgency Index (URI) ===
+# Mjeri urgentnost institucionalnog diskursa
+monthly[, URI := normalize_01(urgency / N) * 100]
+
+# === INDEKS 10: Principal Component Index (PCI) ===
+# PCA na standardiziranim makro kategorijama
+pca_data <- monthly[, .SD, .SDcols = macro_cols]
+pca_data_complete <- pca_data[complete.cases(pca_data)]
+
+if (nrow(pca_data_complete) > 10 && ncol(pca_data_complete) > 2) {
+  pca_data_scaled <- scale(pca_data_complete)
+  pca_result <- prcomp(pca_data_scaled, scale. = FALSE)
+  
+  var_explained <- summary(pca_result)$importance[2, 1:min(5, ncol(pca_result$rotation))]
+  
+  pca_matrix <- as.matrix(pca_data)
+  pca_matrix[is.na(pca_matrix)] <- 0
+  pca_matrix_scaled <- scale(pca_matrix)
+  pc1_scores <- as.numeric(pca_matrix_scaled %*% pca_result$rotation[, 1])
+  
+  monthly[, PCI := normalize_01(pc1_scores) * 100]
+  
+  cat("PCA: PC1 objašnjava", round(var_explained[1] * 100, 1), "% varijance\n")
+} else {
+  monthly[, PCI := IAI]
+}
+
+# Klizni prosjeci
+index_cols <- c("IAI", "CPI", "JEI", "GQI", "ISI", "IUI", "PPI", "IQC", "URI", "PCI")
+index_cols <- index_cols[index_cols %in% names(monthly)]
+
+for (idx in index_cols) {
+  monthly[, paste0(idx, "_MA3") := frollmean(get(idx), n = 3, align = "center")]
+}
+
+cat("Konstruirano", length(index_cols), "indeksa\n")
+```
+
+## Opis indeksa
+
+```{r index-descriptions}
+#| label: index-descriptions
+
+index_desc <- data.table(
+  Indeks = c("IAI", "CPI", "JEI", "GQI", "ISI", "IUI", "PPI", "IQC", "URI", "PCI"),
+  Naziv = c(
+    "Institutional Attention Index",
+    "Corruption Perception Index",
+    "Judicial Efficiency Index",
+    "Governance Quality Index",
+    "Institutional Sentiment Index",
+    "Institutional Uncertainty Index",
+    "Political Polarization Index",
+    "Institutional Quality Composite",
+    "Urgency Index",
+    "Principal Component Index"
+  ),
+  Opis = c(
+    "Ukupna medijska pozornost na institucije normalizirana po broju članaka",
+    "Intenzitet medijskog izvještavanja o korupciji i aferama",
+    "Fokusiranost diskursa na pravosuđe i sudske procese",
+    "Kompozit izvršne vlasti, transparentnosti i javne uprave s prilagodbom za sentiment",
+    "Neto sentiment o institucijama (pozitivno vs negativno izvještavanje)",
+    "Razina neizvjesnosti i nedorečenosti u institucionalnom diskursu",
+    "Intenzitet političke polarizacije i sukoba u medijskom prostoru",
+    "Omjer pozitivnih i negativnih signala o kvaliteti institucija",
+    "Urgentnost i intenzitet institucionalnog diskursa",
+    "Prva glavna komponenta svih makro kategorija"
+  )
+)
+
+kable(index_desc, caption = "Pregled konstruiranih institucionalnih indeksa") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+# Vizualizacija indeksa
+
+## Glavni indeksi
+
+```{r main-indices-plot}
+#| label: main-indices-plot
+#| fig-cap: "Glavni institucionalni indeksi"
+#| fig-height: 12
+
+p1 <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_line(aes(y = IAI, color = "IAI"), linewidth = 1) +
+  geom_line(aes(y = CPI, color = "CPI"), linewidth = 1) +
+  geom_line(aes(y = JEI, color = "JEI"), linewidth = 1) +
+  scale_color_manual(values = c("IAI" = pal$cool, "CPI" = pal$highlight, "JEI" = pal$warm)) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Pozornost, korupcija i pravosuđe", x = NULL, y = "Indeks (0-100)", color = NULL) +
+  theme(legend.position = "bottom")
+
+p2 <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_ribbon(aes(ymin = 50, ymax = ISI), fill = pal$success, alpha = 0.3) +
+  geom_line(aes(y = ISI), color = pal$primary, linewidth = 1) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = pal$muted) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Institutional Sentiment Index (ISI)",
+       subtitle = "Iznad 50 = pozitivan sentiment prevladava",
+       x = NULL, y = "Indeks (0-100)")
+
+p3 <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_area(aes(y = IUI), fill = pal$highlight, alpha = 0.5) +
+  geom_line(aes(y = IUI), color = pal$highlight, linewidth = 1) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Institutional Uncertainty Index (IUI)", x = NULL, y = "Indeks (0-100)")
+
+p4 <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_line(aes(y = PPI, color = "Polarizacija"), linewidth = 1) +
+  geom_line(aes(y = URI, color = "Urgentnost"), linewidth = 1) +
+  scale_color_manual(values = c("Polarizacija" = pal$purple, "Urgentnost" = pal$warm)) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Polarizacija i Urgentnost", x = NULL, y = "Indeks (0-100)", color = NULL) +
+  theme(legend.position = "bottom")
+
+p1 / p2 / p3 / p4
+```
+
+## Governance Quality Index
+
+```{r gqi-plot}
+#| label: gqi-plot
+#| fig-cap: "Governance Quality Index s kliznim prosjekom"
+#| fig-height: 6
+
+if ("GQI" %in% names(monthly)) {
+  ggplot(monthly, aes(x = yearmonth)) +
+    geom_col(aes(y = GQI), fill = pal$light, alpha = 0.7) +
+    geom_line(aes(y = GQI_MA3), color = pal$primary, linewidth = 1.2, na.rm = TRUE) +
+    scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+    labs(
+      title = "Governance Quality Index (GQI)",
+      subtitle = "Tamna linija = 3 mjesečni klizni prosjek",
+      x = NULL, y = "Indeks (0-100)"
+    )
+}
+```
+
+## Institutional Quality Composite
+
+```{r iqc-plot}
+#| label: iqc-plot
+#| fig-cap: "Institutional Quality Composite"
+#| fig-height: 6
+
+ggplot(monthly, aes(x = yearmonth)) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = pal$muted) +
+  geom_area(aes(y = IQC, fill = IQC > 50), alpha = 0.5) +
+  geom_line(aes(y = IQC), color = pal$primary, linewidth = 1) +
+  scale_fill_manual(values = c("TRUE" = pal$success, "FALSE" = pal$highlight), guide = "none") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(
+    title = "Institutional Quality Composite (IQC)",
+    subtitle = "Iznad 50 = više pozitivnih signala o kvaliteti institucija",
+    x = NULL, y = "Indeks (0-100)"
+  )
+```
+
+# Sektorska analiza
+
+## Dinamika po sektorima
+
+```{r sector-dynamics}
+#| label: sector-dynamics
+#| fig-cap: "Dinamika institucionalnih sektora kroz vrijeme"
+#| fig-height: 16
+
+key_macro <- c("macro_korupcija", "macro_pravosude", "macro_izvrsna_vlast",
+               "macro_parlament", "macro_lokalna_samouprava", "macro_kontrolne_institucije",
+               "macro_izbori_demokracija", "macro_transparentnost",
+               "macro_javna_uprava", "macro_policija_sigurnost")
+key_macro <- key_macro[key_macro %in% names(monthly)]
+
+sector_long <- melt(
+  monthly[, c("yearmonth", key_macro), with = FALSE],
+  id.vars = "yearmonth",
+  variable.name = "sektor",
+  value.name = "vrijednost"
+)
+
+sector_long[, sektor := gsub("macro_", "", sektor)]
+sector_long[, vrijednost_norm := normalize_01(vrijednost) * 100, by = sektor]
+
+ggplot(sector_long, aes(x = yearmonth, y = vrijednost_norm)) +
+  geom_area(fill = pal$accent, alpha = 0.3) +
+  geom_line(color = pal$primary, linewidth = 0.8) +
+  geom_smooth(method = "loess", se = FALSE, color = pal$highlight, linewidth = 1, span = 0.3) +
+  facet_wrap(~sektor, ncol = 2, scales = "free_y") +
+  scale_x_date(date_breaks = "6 months", date_labels = "%b %y") +
+  labs(
+    title = "Dinamika institucionalnih sektora kroz vrijeme",
+    subtitle = "Normalizirane vrijednosti s LOESS trendom",
+    x = NULL, y = "Indeks (0-100)"
+  ) +
+  theme(
+    strip.text = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+## Heatmapa sektorske aktivnosti
+
+```{r sector-heatmap}
+#| label: sector-heatmap
+#| fig-cap: "Heatmapa institucionalne medijske aktivnosti"
+#| fig-height: 10
+
+heatmap_data <- sector_long[, .(yearmonth, sektor, vrijednost_norm)]
+
+ggplot(heatmap_data, aes(x = yearmonth, y = sektor, fill = vrijednost_norm)) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "plasma") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b %y") +
+  labs(
+    title = "Heatmapa institucionalne medijske aktivnosti",
+    x = NULL, y = NULL, fill = "Intenzitet\n(0-100)"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Korelacijska struktura
+
+```{r correlation-matrix}
+#| label: correlation-matrix
+#| fig-cap: "Korelacijska matrica sektora i indeksa"
+#| fig-height: 12
+
+cor_vars <- c(macro_cols, index_cols)
+cor_vars <- cor_vars[cor_vars %in% names(monthly)]
+
+cor_data <- monthly[, .SD, .SDcols = cor_vars]
+cor_matrix <- cor(cor_data, use = "pairwise.complete.obs")
+
+rownames(cor_matrix) <- gsub("macro_", "", rownames(cor_matrix))
+colnames(cor_matrix) <- gsub("macro_", "", colnames(cor_matrix))
+
+corrplot(cor_matrix,
+         method = "color",
+         type = "upper",
+         order = "hclust",
+         tl.col = "black",
+         tl.srt = 45,
+         tl.cex = 0.6,
+         addCoef.col = "black",
+         number.cex = 0.4,
+         col = colorRampPalette(c(pal$cool, "white", pal$highlight))(100),
+         title = "Korelacijska matrica",
+         mar = c(0, 0, 2, 0))
+```
+
+# Korupcijski fokus
+
+## Dinamika korupcijskog diskursa
+
+```{r corruption-dynamics}
+#| label: corruption-dynamics
+#| fig-cap: "Detaljnija analiza korupcijskog diskursa"
+#| fig-height: 10
+
+corruption_cols <- names(dt)[grepl("^sem_korupcija_", names(dt))]
+
+if (length(corruption_cols) > 0) {
+  corruption_monthly <- dt[, c(
+    .(N = .N),
+    lapply(.SD, sum, na.rm = TRUE)
+  ), by = yearmonth, .SDcols = corruption_cols][order(yearmonth)]
+  
+  corruption_long <- melt(
+    corruption_monthly,
+    id.vars = c("yearmonth", "N"),
+    variable.name = "kategorija",
+    value.name = "count"
+  )
+  
+  corruption_long[, kategorija := gsub("sem_korupcija_", "", kategorija)]
+  corruption_long[, per_article := count / N]
+  
+  p_corr1 <- ggplot(corruption_long, aes(x = yearmonth, y = per_article, fill = kategorija)) +
+    geom_area(alpha = 0.7) +
+    scale_fill_viridis_d(option = "turbo") +
+    scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+    labs(
+      title = "Struktura korupcijskog diskursa",
+      subtitle = "Pojmova po članku po kategoriji",
+      x = NULL, y = "Pojmova po članku", fill = "Kategorija"
+    ) +
+    theme(legend.position = "bottom")
+  
+  # Korupcija vs ukupni sentiment
+  p_corr2 <- ggplot(monthly, aes(x = yearmonth)) +
+    geom_line(aes(y = scale(CPI)[,1], color = "Korupcija (CPI)"), linewidth = 1) +
+    geom_line(aes(y = scale(ISI)[,1], color = "Sentiment (ISI)"), linewidth = 1) +
+    scale_color_manual(values = c("Korupcija (CPI)" = pal$highlight, "Sentiment (ISI)" = pal$success)) +
+    scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+    labs(
+      title = "Korupcija vs Institucionalni sentiment",
+      subtitle = "Standardizirane vrijednosti",
+      x = NULL, y = "Z-score", color = NULL
+    ) +
+    theme(legend.position = "bottom")
+  
+  p_corr1 / p_corr2
+}
+```
+
+# Sentiment analiza
+
+## Sentiment komponente
+
+```{r sentiment-components}
+#| label: sentiment-components
+#| fig-cap: "Institucionalni sentiment kroz vrijeme"
+#| fig-height: 10
+
+p_sent1 <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_col(aes(y = inst_positive_avg), fill = pal$success, alpha = 0.7) +
+  geom_col(aes(y = -inst_negative_avg), fill = pal$highlight, alpha = 0.7) +
+  geom_hline(yintercept = 0, color = "black") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Pozitivni (gore) vs Negativni (dolje) institucionalni pojmovi po članku",
+       x = NULL, y = "Prosječan broj pojmova")
+
+p_sent2 <- ggplot(monthly, aes(x = yearmonth, y = inst_ratio_avg)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = pal$muted) +
+  geom_area(aes(fill = inst_ratio_avg > 0), alpha = 0.5) +
+  geom_line(color = pal$primary, linewidth = 1) +
+  scale_fill_manual(values = c("TRUE" = pal$success, "FALSE" = pal$highlight), guide = "none") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Neto institucionalni sentiment ratio",
+       subtitle = "(pozitivno - negativno) / (pozitivno + negativno)",
+       x = NULL, y = "Ratio (-1 do 1)")
+
+p_sent3 <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_line(aes(y = quality_high / N * 100, color = "Visoka kvaliteta"), linewidth = 1) +
+  geom_line(aes(y = quality_low / N * 100, color = "Niska kvaliteta"), linewidth = 1) +
+  scale_color_manual(values = c("Visoka kvaliteta" = pal$success, "Niska kvaliteta" = pal$highlight)) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Signali kvalitete institucija", x = NULL, y = "Pojmova na 100 članaka", color = NULL) +
+  theme(legend.position = "bottom")
+
+p_sent1 / p_sent2 / p_sent3
+```
+
+## Scatter plotovi
+
+```{r scatter-plots}
+#| label: scatter-plots
+#| fig-cap: "Odnosi između ključnih indeksa"
+#| fig-height: 10
+
+p_scatter1 <- ggplot(monthly, aes(x = CPI, y = ISI)) +
+  geom_point(aes(size = N, color = yearmonth), alpha = 0.7) +
+  geom_smooth(method = "lm", se = TRUE, color = pal$primary) +
+  scale_color_viridis_c(option = "viridis",
+                        labels = function(x) format(as.Date(x, origin = "1970-01-01"), "%b %Y")) +
+  labs(
+    title = "Korupcija vs Sentiment",
+    x = "Corruption Perception Index", y = "Institutional Sentiment Index",
+    size = "Broj članaka", color = "Mjesec"
+  )
+
+p_scatter2 <- ggplot(monthly, aes(x = IUI, y = PPI)) +
+  geom_point(aes(size = N, color = yearmonth), alpha = 0.7) +
+  geom_smooth(method = "lm", se = TRUE, color = pal$primary) +
+  scale_color_viridis_c(option = "viridis",
+                        labels = function(x) format(as.Date(x, origin = "1970-01-01"), "%b %Y")) +
+  labs(
+    title = "Neizvjesnost vs Polarizacija",
+    x = "Institutional Uncertainty Index", y = "Political Polarization Index",
+    size = "Broj članaka", color = "Mjesec"
+  )
+
+p_scatter1 / p_scatter2
+```
+
+# Volatilnost i momentum
+
+```{r volatility-momentum}
+#| label: volatility-momentum
+#| fig-cap: "Volatilnost i momentum indeksa"
+#| fig-height: 12
+
+# Volatilnost = rolling SD
+monthly[, IAI_vol := frollapply(IAI, n = 3, FUN = sd, align = "right")]
+monthly[, CPI_vol := frollapply(CPI, n = 3, FUN = sd, align = "right")]
+
+# Momentum = M/M promjena
+monthly[, IAI_mom := IAI - shift(IAI, 1)]
+monthly[, CPI_mom := CPI - shift(CPI, 1)]
+
+# 3M momentum
+monthly[, IAI_mom3 := IAI - shift(IAI, 3)]
+
+p_vol <- ggplot(monthly[!is.na(IAI_vol)], aes(x = yearmonth)) +
+  geom_area(aes(y = IAI_vol), fill = pal$cool, alpha = 0.5) +
+  geom_line(aes(y = IAI_vol), color = pal$primary, linewidth = 1) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "IAI volatilnost (3M rolling SD)", x = NULL, y = "Standardna devijacija")
+
+p_mom <- ggplot(monthly[!is.na(IAI_mom)], aes(x = yearmonth)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = pal$muted) +
+  geom_col(aes(y = IAI_mom, fill = IAI_mom > 0), alpha = 0.7) +
+  scale_fill_manual(values = c("TRUE" = pal$success, "FALSE" = pal$highlight), guide = "none") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "IAI momentum (M/M promjena)", x = NULL, y = "Promjena")
+
+p_mom3 <- ggplot(monthly[!is.na(IAI_mom3)], aes(x = yearmonth)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = pal$muted) +
+  geom_area(aes(y = IAI_mom3, fill = IAI_mom3 > 0), alpha = 0.5) +
+  geom_line(aes(y = IAI_mom3), color = pal$primary, linewidth = 1) +
+  scale_fill_manual(values = c("TRUE" = pal$success, "FALSE" = pal$highlight), guide = "none") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "IAI 3 mjesečni momentum", x = NULL, y = "Promjena")
+
+p_combined <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_line(aes(y = scale(IAI)[,1], color = "IAI (std)"), linewidth = 1) +
+  geom_line(aes(y = scale(CPI)[,1], color = "CPI (std)"), linewidth = 1) +
+  geom_line(aes(y = scale(ISI)[,1], color = "ISI (std)"), linewidth = 1) +
+  scale_color_manual(values = c("IAI (std)" = pal$cool, "CPI (std)" = pal$highlight, "ISI (std)" = pal$success)) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Standardizirani indeksi", x = NULL, y = "Z-score", color = NULL) +
+  theme(legend.position = "bottom")
+
+p_vol / p_mom / p_mom3 / p_combined
+```
+
+# Topic concentration
+
+```{r topic-concentration}
+#| label: topic-concentration
+#| fig-cap: "Koncentracija institucionalnih tema"
+#| fig-height: 8
+
+# Herfindahl indeks koncentracije po mjesecu
+calc_hhi <- function(values) {
+  values <- values[values > 0]
+  if (length(values) == 0) return(0)
+  shares <- values / sum(values)
+  sum(shares^2)
+}
+
+monthly[, topic_hhi := apply(.SD, 1, calc_hhi), .SDcols = macro_cols]
+monthly[, topic_count := rowSums(.SD > 0), .SDcols = macro_cols]
+
+p_hhi <- ggplot(monthly, aes(x = yearmonth, y = topic_hhi)) +
+  geom_line(color = pal$primary, linewidth = 1) +
+  geom_smooth(method = "loess", se = TRUE, color = pal$highlight, span = 0.3) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(
+    title = "Herfindahl indeks koncentracije tema",
+    subtitle = "Viši = fokusiranije na manje tema | Niži = disperziranije",
+    x = NULL, y = "HHI"
+  )
+
+p_count <- ggplot(monthly, aes(x = yearmonth, y = topic_count)) +
+  geom_col(fill = pal$accent, alpha = 0.7) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Broj aktivnih institucionalnih tema po mjesecu", x = NULL, y = "Broj tema")
+
+p_hhi / p_count
+```
+
+# Korelacije između indeksa
+
+```{r index-correlations}
+#| label: index-correlations
+
+index_cols_final <- index_cols[index_cols %in% names(monthly)]
+
+index_cor <- cor(monthly[, .SD, .SDcols = index_cols_final], use = "pairwise.complete.obs")
+
+kable(round(index_cor, 3), caption = "Korelacijska matrica institucionalnih indeksa") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+# Export
+
+```{r export-excel}
+#| label: export-excel
+
+wb <- createWorkbook()
+
+# Sheet 1: Glavni indeksi
+addWorksheet(wb, "Indeksi")
+export_indices <- monthly[, c(
+  "yearmonth", "N",
+  index_cols_final,
+  paste0(index_cols_final[1:min(3, length(index_cols_final))], "_MA3")
+), with = FALSE]
+names(export_indices)[1:2] <- c("Datum", "Broj_clanaka")
+writeData(wb, "Indeksi", export_indices)
+
+# Sheet 2: Sektori
+addWorksheet(wb, "Sektori")
+export_sectors <- monthly[, c("yearmonth", macro_cols), with = FALSE]
+names(export_sectors) <- c("Datum", gsub("macro_", "", macro_cols))
+writeData(wb, "Sektori", export_sectors)
+
+# Sheet 3: Sentiment
+addWorksheet(wb, "Sentiment")
+export_sentiment <- monthly[, .(
+  Datum = yearmonth,
+  Pozitivan = inst_positive,
+  Negativan = inst_negative,
+  Net = inst_net,
+  Ratio = inst_ratio_avg,
+  Kvaliteta_visoka = quality_high,
+  Kvaliteta_niska = quality_low,
+  Neizvjesnost = uncertainty,
+  Urgentnost = urgency,
+  Polarizacija = polarization
+)]
+writeData(wb, "Sentiment", export_sentiment)
+
+# Sheet 4: Volatilnost
+addWorksheet(wb, "Volatilnost")
+export_vol <- monthly[, .(
+  Datum = yearmonth,
+  IAI_volatilnost = IAI_vol,
+  IAI_momentum = IAI_mom,
+  IAI_momentum_3M = IAI_mom3,
+  Topic_HHI = topic_hhi
+)]
+writeData(wb, "Volatilnost", export_vol)
+
+# Stilovi
+header_style <- createStyle(
+  textDecoration = "bold",
+  fgFill = "#1a1a2e",
+  fontColour = "white",
+  halign = "center"
+)
+
+for (sheet in names(wb)) {
+  ncols <- switch(sheet,
+    "Indeksi" = ncol(export_indices),
+    "Sektori" = ncol(export_sectors),
+    "Sentiment" = ncol(export_sentiment),
+    "Volatilnost" = ncol(export_vol)
+  )
+  addStyle(wb, sheet, header_style, rows = 1, cols = 1:ncols, gridExpand = TRUE)
+  setColWidths(wb, sheet, cols = 1:ncols, widths = "auto")
+}
+
+output_path <- here("output", "semantic_institutions_indices.xlsx")
+dir.create(here("output"), showWarnings = FALSE, recursive = TRUE)
+saveWorkbook(wb, output_path, overwrite = TRUE)
+cat("Excel exportiran:", output_path, "\n")
+```
+
+# Sažetak
+
+```{r summary}
+#| label: summary
+
+summary_table <- data.table(
+  Metrika = c(
+    "Broj analiziranih članaka",
+    "Vremenski raspon",
+    "Broj semantičkih kategorija",
+    "Broj makro sektora",
+    "Broj konstruiranih indeksa",
+    "Prosječni IAI",
+    "Prosječni institucionalni sentiment ratio",
+    "Prosječni CPI",
+    "Prosječni IUI"
+  ),
+  Vrijednost = c(
+    format(nrow(dt), big.mark = ","),
+    paste(format(date_min, "%m/%Y"), "-", format(date_max, "%m/%Y")),
+    length(sem_cols),
+    length(macro_cols),
+    length(index_cols_final),
+    round(mean(monthly$IAI, na.rm = TRUE), 1),
+    round(mean(monthly$inst_ratio_avg, na.rm = TRUE), 3),
+    round(mean(monthly$CPI, na.rm = TRUE), 1),
+    round(mean(monthly$IUI, na.rm = TRUE), 1)
+  )
+)
+
+kable(summary_table, caption = "Sažetak institucionalne analize") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+*Izvještaj generiran: `r Sys.time()`*
+
+*GIMES Research | Semantički indeks institucionalnog okruženja v1.0*

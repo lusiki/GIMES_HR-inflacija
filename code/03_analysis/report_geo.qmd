@@ -1,0 +1,1426 @@
+---
+title: "Semantički indeks geopolitičke nestabilnosti"
+subtitle: "Mjerenje geopolitičkih rizika kroz analizu medijskog diskursa"
+author: "GIMES Research"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 4
+    toc-location: left
+    number-sections: true
+    theme: cosmo
+    code-fold: true
+    code-summary: "Prikaži kod"
+    fig-width: 11
+    fig-height: 7
+    df-print: paged
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+lang: hr
+---
+
+```{r setup}
+#| label: setup
+#| include: false
+
+library(data.table)
+library(ggplot2)
+library(scales)
+library(lubridate)
+library(stringi)
+library(knitr)
+library(kableExtra)
+library(zoo)
+library(openxlsx)
+library(here)
+library(corrplot)
+library(patchwork)
+library(viridis)
+
+options(scipen = 999)
+theme_set(theme_minimal(base_size = 12))
+
+pal <- list(
+  dark = "#1a1a2e",
+  primary = "#16213e",
+  accent = "#0f3460",
+  highlight = "#e94560",
+  warm = "#f39c12",
+  cool = "#3498db",
+  success = "#27ae60",
+  muted = "#7f8c8d",
+  light = "#ecf0f1",
+  purple = "#9b59b6",
+  teal = "#1abc9c",
+  danger = "#c0392b"
+)
+```
+
+# Uvod
+
+Ovaj dokument konstruira semantičke indekse geopolitičke nestabilnosti temeljene na analizi medijskog diskursa. Indeksi mjere intenzitet, sentiment i neizvjesnost vezanu uz geopolitičke događaje, sukobe i međunarodne odnose.
+
+```{r load-data}
+#| label: load-data
+
+#dt <- as.data.table(read.xlsx(here("data", "geopolitical_filtered.xlsx")))
+
+dt <- as.data.table(read.xlsx("C:/Users/lsikic/Desktop/geopolitical_filtered.xlsx"))
+
+
+if (is.numeric(dt$DATE)) {
+  dt[, DATE := as.Date(DATE, origin = "1899-12-30")]
+} else {
+  dt[, DATE := as.Date(DATE)]
+}
+
+if ("text_length" %in% names(dt)) dt[, text_length := as.numeric(text_length)]
+if ("REACH" %in% names(dt)) dt[, REACH := as.numeric(REACH)]
+
+dt[, `:=`(
+  date = DATE,
+  year = year(DATE),
+  month = month(DATE),
+  quarter = quarter(DATE),
+  yearmonth = floor_date(DATE, "month"),
+  yearquarter = floor_date(DATE, "quarter")
+)]
+
+date_min <- min(dt$date, na.rm = TRUE)
+date_max <- max(dt$date, na.rm = TRUE)
+
+cat("Učitano", nrow(dt), "članaka\n")
+cat("Vremenski raspon:", as.character(date_min), "do", as.character(date_max), "\n")
+```
+
+# Eksploratorni pregled
+
+```{r basic-stats}
+#| label: basic-stats
+
+stats_summary <- data.table(
+  Metrika = c(
+    "Ukupan broj članaka",
+    "Vremenski raspon",
+    "Broj dana",
+    "Prosječno članaka dnevno",
+    "Broj izvora",
+    "Medijan duljine članka"
+  ),
+  Vrijednost = c(
+    format(nrow(dt), big.mark = ","),
+    paste(format(date_min, "%d.%m.%Y"), "do", format(date_max, "%d.%m.%Y")),
+    as.character(as.numeric(date_max - date_min)),
+    round(nrow(dt) / as.numeric(date_max - date_min), 2),
+    length(unique(dt$FROM)),
+    format(median(dt$text_length, na.rm = TRUE), big.mark = ",")
+  )
+)
+
+kable(stats_summary, caption = "Osnovne statistike dataseta") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r source-distribution}
+#| label: source-distribution
+#| fig-cap: "Top 20 izvora po broju članaka"
+
+top_sources <- dt[, .(N = .N), by = FROM][order(-N)][1:20]
+
+ggplot(top_sources, aes(x = reorder(FROM, N), y = N)) +
+  geom_col(fill = pal$primary, alpha = 0.8) +
+  geom_text(aes(label = format(N, big.mark = ",")), hjust = -0.1, size = 3) +
+  coord_flip() +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(title = "Top 20 izvora po broju članaka", x = NULL, y = "Broj članaka") +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+```{r time-distribution}
+#| label: time-distribution
+#| fig-cap: "Mjesečni broj članaka"
+#| fig-height: 6
+
+monthly_count <- dt[, .(N = .N), by = yearmonth][order(yearmonth)]
+monthly_count[, MA3 := frollmean(N, n = 3, align = "center")]
+
+ggplot(monthly_count, aes(x = yearmonth)) +
+  geom_col(aes(y = N), fill = pal$light, alpha = 0.7) +
+  geom_line(aes(y = MA3), color = pal$highlight, linewidth = 1.2, na.rm = TRUE) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(
+    title = "Mjesečni broj članaka o geopolitičkim temama",
+    subtitle = "Crvena linija = 3 mjesečni klizni prosjek",
+    x = NULL, y = "Broj članaka"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+# Semantička taksonomija
+
+## Hijerarhijska struktura pojmova
+
+```{r semantic-taxonomy}
+#| label: semantic-taxonomy
+
+geopolitical_taxonomy <- list(
+  
+ # === 1. ORUŽANI SUKOBI I RATOVI ===
+  sukobi_ratovi = list(
+    rat_opce = c(
+      "\\brat[aou]?\\b", "\\bratov[aeiou]+\\b", "ratovanj[aeu]?",
+      "\\bwar\\b", "warfare", "oružan[aeiou]+.{0,10}sukob",
+      "vojn[aeiou]+.{0,10}sukob", "neprijateljstv[aeiou]?"
+    ),
+    invazija_okupacija = c(
+      "invazij[aeiou]?", "okupacij[aeiou]?", "agresij[aeiou]?",
+      "napad.{0,10}na.{0,10}(zemlju|državu|teritorij)",
+      "vojn[aeiou]+.{0,10}intervencij[aeiou]?"
+    ),
+    bojiste = c(
+      "boji[sš]t[aeu]?", "front[aeu]?", "linij[aeiou]+.{0,10}front",
+      "borbena?.{0,10}linij[aeiou]?", "rov[aeiou]?"
+    ),
+    ofenziva_defenziva = c(
+      "ofenziv[aeiou]?", "defenziv[aeiou]?", "protuofenziv[aeiou]?",
+      "napad[aeiou]?", "obran[aeiou]?", "povla[cč]enj[aeu]?"
+    ),
+    zrtve = c(
+      "[zž]rtv[aeiou]?", "poginut[aeiou]?", "poginul[aeiou]+",
+      "ubijen[aeiou]?", "ranjen[aeiou]?", "civiln[aeiou]+.{0,10}žrtv",
+      "masak[a]?r", "genocid", "zlo[cč]in.{0,10}(protiv.{0,10})?[cč]ovje[cč]nost"
+    )
+  ),
+  
+  # === 2. RUSIJA I UKRAJINA ===
+  rusija_ukrajina = list(
+    rusija = c(
+      "\\bRusij[aeiou]?\\b", "rusk[aeiou]+", "\\bMoskv[aeiou]?\\b",
+      "\\bKremlj[aeiou]?\\b", "\\bPutin[aeiou]?\\b",
+      "Ruska?.{0,5}Federacij[aeiou]?"
+    ),
+    ukrajina = c(
+      "\\bUkrajin[aeiou]?\\b", "ukrajinsk[aeiou]+",
+      "\\bKijev[aeiou]?\\b", "\\bKyiv\\b",
+      "\\bZelenski[aeiou]?\\b", "\\bZelensky\\b", "\\bZalu[zž]n[aeiou]+\\b"
+    ),
+    ruski_rat = c(
+      "rusk[aeiou]+.{0,10}(invazij|agresij|napad|rat)",
+      "(invazij|agresij|napad|rat).{0,10}(na.{0,5})?Ukrajin",
+      "rusko.{0,5}ukrajinsk[aeiou]+.{0,10}(rat|sukob)",
+      "specijalna.{0,10}vojn[aeiou]+.{0,10}operacij[aeiou]?"
+    ),
+    regije_ukrajina = c(
+      "\\bDonbas[aeiou]?\\b", "\\bDoneck\\b", "\\bLuhansk\\b", "\\bLugansk\\b",
+      "\\bKrim[aeiou]?\\b", "\\bCrime[aeiou]?\\b", "\\bHerson[aeiou]?\\b",
+      "\\bZaporož[aeiou]+\\b", "\\bHarkiv[aeiou]?\\b", "\\bMariupolj[aeiou]?\\b",
+      "\\bBahmut[aeiou]?\\b", "\\bAvdiivk[aeiou]?\\b"
+    ),
+    wagner = c(
+      "\\bWagner[aeiou]?\\b", "Prigožin[aeiou]?", "Prigozhin",
+      "pla[cć]eni[cč]k[aeiou]+.{0,10}(skupin|grupa)"
+    )
+  ),
+  
+  # === 3. IZRAEL I BLISKI ISTOK ===
+  izrael_bliski_istok = list(
+    izrael = c(
+      "\\bIzrael[aeiou]?\\b", "izraelsk[aeiou]+",
+      "\\bTel.?Aviv[aeiou]?\\b", "\\bJeruzalem[aeiou]?\\b",
+      "\\bNetanyahu[aeiou]?\\b", "\\bIDF\\b",
+      "izraelske?.{0,5}obrambene?.{0,5}snage"
+    ),
+    palestina = c(
+      "\\bPalestin[aeiou]+\\b", "palestinsk[aeiou]+",
+      "\\bGaz[aeiou]?\\b", "pojas[aeiou]?.{0,5}Gaz[aeiou]?",
+      "Zapadn[aeiou]+.{0,5}obal[aeiou]?", "\\bWest.?Bank\\b"
+    ),
+    hamas = c(
+      "\\bHamas[aeiou]?\\b", "hamasov[aeiou]+",
+      "Al.?Kasam", "Al.?Qassam", "Brigad[aeiou]+.{0,10}Kasam",
+      "Hanij[aeiou]?", "Haniyeh", "7\\.?.{0,5}listopad[aeiou]?"
+    ),
+    hezbollah = c(
+      "\\bHezbola[h]?[aeiou]?\\b", "hezbolahov[aeiou]+",
+      "\\bNasrala[h]?[aeiou]?\\b", "\\bNasrallah\\b",
+      "libanonsk[aeiou]+.{0,10}milicij[aeiou]?"
+    ),
+    libanon = c(
+      "\\bLibanon[aeiou]?\\b", "libanonsk[aeiou]+",
+      "\\bBejrut[aeiou]?\\b", "\\bBeirut\\b", "\\bDahiye[h]?\\b"
+    ),
+    iran = c(
+      "\\bIran[aeiou]?\\b", "iransk[aeiou]+",
+      "\\bTeheran[aeiou]?\\b", "ajatolah", "ayatollah",
+      "Iranska?.{0,5}revolucionarna.{0,5}garda"
+    ),
+    sirija = c(
+      "\\bSirij[aeiou]?\\b", "sirijsk[aeiou]+",
+      "\\bDamask[aeiou]?\\b", "\\bAsad[aeiou]?\\b", "\\bAssad\\b"
+    ),
+    arapske_zemlje = c(
+      "Saudijsk[aeiou]+.{0,10}Arabij[aeiou]?", "\\bUAE\\b",
+      "Ujedinjeni.{0,5}Arapski.{0,5}Emirati", "\\bKatar[aeiou]?\\b",
+      "\\bEgipt[aeiou]?\\b", "\\bJordan[aeiou]?\\b"
+    )
+  ),
+  
+  # === 4. NATO I ZAPADNE INSTITUCIJE ===
+  nato_zapad = list(
+    nato = c(
+      "\\bNATO[aeiou]?\\b", "Sjevernoatlantsk[aeiou]+.{0,10}(savez|pakt)",
+      "Atlantsk[aeiou]+.{0,10}savez", "[cč]lanic[aeiou]+.{0,10}NATO"
+    ),
+    eu = c(
+      "\\bEU\\b", "Europsk[aeiou]+.{0,10}unij[aeiou]?",
+      "\\bBruxelles\\b", "\\bBrisel[aeiou]?\\b",
+      "europsk[aeiou]+.{0,10}(institucij|komisij|parlamen|vije[cć])"
+    ),
+    sad = c(
+      "\\bSAD\\b", "Sjedinjene?.{0,5}Ameri[cč]ke?.{0,5}Države",
+      "\\bWashington[aeiou]?\\b", "Bijela?.{0,5}ku[cć][aeiou]?",
+      "\\bBiden[aeiou]?\\b", "\\bTrump[aeiou]?\\b",
+      "ameri[cč]k[aeiou]+.{0,10}(administracij|vlad|politk)"
+    ),
+    britanija = c(
+      "\\bBritanij[aeiou]?\\b", "britansk[aeiou]+",
+      "Ujedinjeno.{0,5}Kraljevstvo", "\\bUK\\b",
+      "\\bLondon[aeiou]?\\b"
+    ),
+    njemacka = c(
+      "\\bNjema[cč]k[aeiou]?\\b", "njema[cč]k[aeiou]+",
+      "\\bBerlin[aeiou]?\\b", "\\bScholz[aeiou]?\\b",
+      "\\bBundestag[aeiou]?\\b"
+    ),
+    francuska = c(
+      "\\bFrancusk[aeiou]?\\b", "francusk[aeiou]+",
+      "\\bPariz[aeiou]?\\b", "\\bMacron[aeiou]?\\b",
+      "\\bElysee\\b"
+    )
+  ),
+  
+  # === 5. KINA I AZIJA-PACIFIK ===
+  kina_azija = list(
+    kina = c(
+      "\\bKin[aeiou]?\\b", "kinesk[aeiou]+", "\\bNR.?Kin[aeiou]?\\b",
+      "\\bPeking[aeiou]?\\b", "\\bBeijing\\b",
+      "\\bXi.?Jinping[aeiou]?\\b", "Komunisti[cč]k[aeiou]+.{0,10}partij[aeiou]?",
+      "\\bKPK\\b", "\\bCCP\\b"
+    ),
+    tajvan = c(
+      "\\bTajvan[aeiou]?\\b", "tajvansk[aeiou]+",
+      "\\bTaipei\\b", "Tjesnac[aeiou]?.{0,10}Tajvan",
+      "kinesko.{0,10}ujedinjenje"
+    ),
+    juzno_kinesko_more = c(
+      "Ju[zž]no.{0,5}kinesko.{0,5}more",
+      "Isto[cč]no.{0,5}kinesko.{0,5}more",
+      "\\bSpratly\\b", "\\bParacel\\b",
+      "filipinsk[aeiou]+.{0,10}(more|vod[aeiou])"
+    ),
+    sjeverna_koreja = c(
+      "Sjevern[aeiou]+.{0,5}Korej[aeiou]?", "sjevernokorejsk[aeiou]+",
+      "\\bPjongjang[aeiou]?\\b", "\\bPyongyang\\b",
+      "\\bKim.?Jong.?Un[aeiou]?\\b", "\\bDPRK\\b"
+    ),
+    japan_juzna_koreja = c(
+      "\\bJapan[aeiou]?\\b", "japansk[aeiou]+", "\\bTokio\\b", "\\bTokyo\\b",
+      "Ju[zž]n[aeiou]+.{0,5}Korej[aeiou]?", "ju[zž]nokorejsk[aeiou]+", "\\bSeul[aeiou]?\\b"
+    ),
+    indo_pacifik = c(
+      "Indo.?Pacifik", "\\bAUKUS\\b", "\\bQUAD\\b",
+      "azijsko.{0,10}pacifi[cč]k[aeiou]+"
+    )
+  ),
+  
+  # === 6. BALKAN I JUGOISTOČNA EUROPA ===
+  balkan = list(
+    srbija = c(
+      "\\bSrbij[aeiou]?\\b", "srpsk[aeiou]+",
+      "\\bBeograd[aeiou]?\\b", "\\bVu[cč]i[cć][aeiou]?\\b"
+    ),
+    kosovo = c(
+      "\\bKosov[aou]?\\b", "kosovsk[aeiou]+",
+      "\\bPri[sš]tin[aeiou]?\\b", "\\bKurti[aeiou]?\\b",
+      "srpsko.{0,10}kosovsk[aeiou]+"
+    ),
+    bih = c(
+      "Bosn[aeiou]+.{0,10}Hercegovin[aeiou]?", "\\bBiH\\b",
+      "bosansko?herceogva[cč]k[aeiou]+", "\\bSarajev[aou]?\\b",
+      "\\bDodik[aeiou]?\\b", "Republika?.{0,5}Srpsk[aeiou]?"
+    ),
+    crna_gora = c(
+      "Crn[aeiou]+.{0,5}Gor[aeiou]?", "crnogorsk[aeiou]+",
+      "\\bPodgoric[aeiou]?\\b"
+    ),
+    madarska = c(
+      "\\bMa[dđ]arsk[aeiou]?\\b", "ma[dđ]arsk[aeiou]+",
+      "\\bBudimpe[sš]t[aeiou]?\\b", "\\bOrban[aeiou]?\\b"
+    ),
+    turska = c(
+      "\\bTursk[aeiou]?\\b", "tursk[aeiou]+",
+      "\\bAnkar[aeiou]?\\b", "\\bErdogan[aeiou]?\\b",
+      "\\bBospor[aeiou]?\\b", "\\bDardanel[aeiou]+\\b"
+    )
+  ),
+  
+  # === 7. VOJSKA I ORUŽJE ===
+  vojska_oruzje = list(
+    vojska_opce = c(
+      "vojsk[aeiou]?", "vojn[aeiou]+.{0,10}snag[aeiou]?",
+      "oru[zž]ane?.{0,10}snag[aeiou]?", "militar[aeiou]+",
+      "borbene?.{0,10}snag[aeiou]?"
+    ),
+    kopnene_snage = c(
+      "kopnen[aeiou]+.{0,10}snag[aeiou]?", "pje[sš]a[sš]tv[aou]?",
+      "oklopn[aeiou]+.{0,10}(snage|vozil|brigad)",
+      "\\btenk[aeiou]+\\b", "artiljerij[aeiou]?"
+    ),
+    zrakoplovstvo = c(
+      "zrakoplovstv[aou]?", "borbeni?.{0,10}avion[aeiou]?",
+      "\\bF.?16\\b", "\\bF.?35\\b", "zra[cč]n[aeiou]+.{0,10}napad",
+      "bombardiranj[aeu]?"
+    ),
+    mornarica = c(
+      "mornaric[aeiou]?", "ratn[aeiou]+.{0,10}brod[aeiou]?",
+      "podmornic[aeiou]?", "flot[aeiou]?",
+      "pomorsk[aeiou]+.{0,10}snag[aeiou]?"
+    ),
+    dronovi = c(
+      "dron[aeiou]?", "bespilotna?.{0,10}letjelic[aeiou]?",
+      "\\bUAV\\b", "\\bUCAV\\b", "kamikaza.{0,10}dron"
+    ),
+    rakete = c(
+      "raket[aeiou]?", "projektil[aeiou]?", "balisti[cč]k[aeiou]+",
+      "krstarec[aeiou]+.{0,10}raket[aeiou]?", "hipersoni[cč]n[aeiou]+",
+      "protuzra[cč]n[aeiou]+.{0,10}obran[aeiou]?", "\\bPVO\\b"
+    ),
+    nuklearno = c(
+      "nuklearn[aeiou]+", "atomsk[aeiou]+", "nukleark[aeiou]?",
+      "nuklearno?.{0,10}oru[zž]je", "\\bICBM\\b",
+      "nuklearna?.{0,10}prijetnja", "nuklearna?.{0,10}eskalacij"
+    ),
+    vojna_pomoc = c(
+      "vojn[aeiou]+.{0,10}pomo[cć][aeiou]?",
+      "isporuk[aeiou]+.{0,10}oru[zž]j[aeiou]?",
+      "vojno?.{0,10}oprema", "\\bHIMARS\\b", "\\bJavelin\\b",
+      "\\bPatriot\\b", "\\bLeopard\\b", "\\bAbrams\\b"
+    )
+  ),
+  
+  # === 8. DIPLOMACIJA I MEĐUNARODNI ODNOSI ===
+  diplomacija = list(
+    diplomacija_opce = c(
+      "diplomacij[aeiou]?", "diplomatsk[aeiou]+",
+      "me[dđ]unarodni?.{0,10}odnos[aeiou]?",
+      "vanjsk[aeiou]+.{0,10}politik[aeiou]?"
+    ),
+    pregovori = c(
+      "pregovor[aeiou]?", "mirovni?.{0,10}pregovor",
+      "diplomatsk[aeiou]+.{0,10}(rje[sš]enj|inicijativ|napor)",
+      "posredovanj[aeu]?"
+    ),
+    sankcije = c(
+      "sankcij[aeiou]?", "embargo", "mjere?.{0,10}ograni[cč]enj",
+      "trgovinske?.{0,10}sankcij", "financijske?.{0,10}sankcij",
+      "zamrzavanj[aeu]+.{0,10}imovine?"
+    ),
+    summit = c(
+      "summit[aeiou]?", "sastanak.{0,10}na.{0,10}vrh",
+      "bilateralni?.{0,10}susret", "me[dđ]unarodni?.{0,10}konferencij"
+    ),
+    ujedinjeni_narodi = c(
+      "\\bUN\\b", "Ujedinjeni?.{0,10}narod[aeiou]?",
+      "Vije[cć]e?.{0,10}sigurnosti", "Generalna?.{0,10}skup[sš]tin[aeiou]?",
+      "\\bUNESCO\\b", "\\bUNHCR\\b", "rezolucij[aeiou]+.{0,10}UN"
+    ),
+    savezi_koalicije = c(
+      "savez[aeiou]?", "koalicij[aeiou]?", "partnerstv[aou]?",
+      "strate[sš]ki?.{0,10}partnerstvo", "vojn[aeiou]+.{0,10}savez"
+    )
+  ),
+  
+  # === 9. TERORIZAM I SIGURNOST ===
+  terorizam_sigurnost = list(
+    terorizam = c(
+      "terorizam", "teroristi[cč]k[aeiou]+",
+      "teroristi?[cč]k[aeiou]+.{0,10}napad",
+      "atentat[aeiou]?", "samoubila[cč]k[aeiou]+.{0,10}napad"
+    ),
+    islamski_ekstremizam = c(
+      "d[zž]ihadis?t[aeiou]+", "d[zž]ihad[aeiou]?",
+      "\\bISIS\\b", "\\bISIL\\b", "Islamsk[aeiou]+.{0,10}dr[zž]av[aeiou]?",
+      "Al.?Kaid[aeiou]?", "Al.?Qaeda"
+    ),
+    kiberneticka_sigurnost = c(
+      "kiberneti[cč]k[aeiou]+.{0,10}(napad|rat|sigurnost)",
+      "cyber.?(napad|rat|sigurnost)", "haker[aeiou]?",
+      "kiberneti[cč]k[aeiou]+.{0,10}prijetn"
+    ),
+    obaviestajne_sluzbe = c(
+      "obavje[sš]tajn[aeiou]+.{0,10}slu[zž]b[aeiou]?",
+      "\\bCIA\\b", "\\bFSB\\b", "\\bMI6\\b", "\\bMossad\\b",
+      "[sš]pijuna?[zž][aeiou]?", "[sš]pijun[aeiou]?"
+    ),
+    sigurnosna_politika = c(
+      "sigurnosn[aeiou]+.{0,10}politik[aeiou]?",
+      "nacionaln[aeiou]+.{0,10}sigurnost",
+      "obran[aeiou]+.{0,10}strategi[aeiou]?"
+    )
+  ),
+  
+  # === 10. HUMANITARNA KRIZA ===
+  humanitarno = list(
+    izbjeglice = c(
+      "izbjegl[iaeiou]+", "prognanik[aeiou]?",
+      "izbjegli[cč]k[aeiou]+.{0,10}(kriz|val)",
+      "raselj[aeiou]+.{0,10}osob[aeiou]?", "\\bIDP\\b"
+    ),
+    humanitarna_pomoc = c(
+      "humanitarn[aeiou]+.{0,10}pomo[cć][aeiou]?",
+      "humanitarn[aeiou]+.{0,10}kriz[aeiou]?",
+      "humanitarn[aeiou]+.{0,10}koridor",
+      "evakuacij[aeiou]?"
+    ),
+    ratni_zlocini = c(
+      "ratn[aeiou]+.{0,10}zlo[cč]in[aeiou]?",
+      "zlo[cč]in[aeiou]+.{0,10}protiv.{0,10}[cč]ovje[cč]nost",
+      "\\bICC\\b", "Me[dđ]unarodni?.{0,10}kazneni?.{0,10}sud",
+      "Haag", "Den.?Haag"
+    ),
+    civilne_zrtve = c(
+      "civiln[aeiou]+.{0,10}[zž]rtv[aeiou]?",
+      "civiln[aeiou]+.{0,10}(stanovni[sš]tv|populacij)",
+      "kolateralna?.{0,10}[sš]tet[aeiou]?"
+    )
+  ),
+  
+  # === 11. ENERGETIKA I RESURSI ===
+  energetika_resursi = list(
+    nafta_plin = c(
+      "\\bnaft[aeiou]?\\b", "\\bplin[aeiou]?\\b",
+      "prirodni?.{0,10}plin", "\\bLNG\\b",
+      "naftovod[aeiou]?", "plinovod[aeiou]?",
+      "\\bOPEC\\b"
+    ),
+    energetska_sigurnost = c(
+      "energetsk[aeiou]+.{0,10}sigurnost",
+      "energetsk[aeiou]+.{0,10}kriz[aeiou]?",
+      "opskrb[aeiou]+.{0,10}energij"
+    ),
+    nord_stream = c(
+      "Nord.?Stream", "Sjeverni?.{0,10}tok",
+      "Turski?.{0,10}tok", "Turkish.?Stream"
+    ),
+    kritična_infrastruktura = c(
+      "kriti[cč]n[aeiou]+.{0,10}infrastruktur[aeiou]?",
+      "sabota[zž][aeiou]?", "diverzij[aeiou]?"
+    )
+  ),
+  
+  # === 12. MEDIJSKE I INFORMACIJSKE OPERACIJE ===
+  informacijsko_ratovanje = list(
+    dezinformacije = c(
+      "dezinformacij[aeiou]?", "la[zž]ne?.{0,10}vijesti",
+      "\\bfake.?news\\b", "propaganda",
+      "informacijski?.{0,10}rat"
+    ),
+    hibridno_ratovanje = c(
+      "hibridn[aeiou]+.{0,10}rat", "hibridna?.{0,10}prijetn",
+      "siv[aeiou]+.{0,10}zon[aeiou]?"
+    ),
+    utjecajne_operacije = c(
+      "utjecajn[aeiou]+.{0,10}operacij[aeiou]?",
+      "mije[sš]anj[aeu]+.{0,10}u.{0,10}izbor",
+      "stran[aeiou]+.{0,10}utjecaj"
+    )
+  )
+)
+
+flatten_taxonomy <- function(taxonomy) {
+  result <- list()
+  for (macro in names(taxonomy)) {
+    for (meso in names(taxonomy[[macro]])) {
+      key <- paste0(macro, "_", meso)
+      result[[key]] <- taxonomy[[macro]][[meso]]
+    }
+  }
+  result
+}
+
+flat_terms <- flatten_taxonomy(geopolitical_taxonomy)
+
+tax_summary <- rbindlist(lapply(names(geopolitical_taxonomy), function(macro) {
+  rbindlist(lapply(names(geopolitical_taxonomy[[macro]]), function(meso) {
+    data.table(
+      Makro_kategorija = macro,
+      Meso_kategorija = meso,
+      Broj_pojmova = length(geopolitical_taxonomy[[macro]][[meso]])
+    )
+  }))
+}))
+
+kable(tax_summary, caption = "Struktura geopolitičke semantičke taksonomije") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Sentiment i neizvjesnost leksikoni
+
+```{r sentiment-uncertainty-lexicons}
+#| label: sentiment-uncertainty-lexicons
+
+# Geopolitički sentiment leksikon (eskalacija vs deeskalacija)
+sentiment_lexicon <- list(
+  positive = c(
+    # Deeskalacija i mir
+    "mir", "mirovni", "primirje", "prekid vatre", "deeskalacija",
+    "pregovori", "dogovor", "sporazum", "ugovor", "potpisivanje",
+    "normalizacija", "stabilizacija", "smirivanje", "povlačenje",
+    "oslobađanje", "razmjena zarobljenika", "humanitarni koridor",
+    "diplomatsko rješenje", "suradnja", "partnerstvo", "savez",
+    "podrška", "solidarnost", "jedinstvo", "pobjednik", "pobjeda",
+    "uspjeh", "napredak", "proboj", "oslobođenje", "obrana"
+  ),
+  negative = c(
+    # Eskalacija i sukob
+    "rat", "sukob", "napad", "invazija", "agresija", "ofenziva",
+    "bombardiranje", "granatiranje", "masakr", "genocid", "zločin",
+    "žrtve", "poginuli", "ranjeni", "razaranje", "uništenje",
+    "eskalacija", "prijetnja", "ultimatum", "sankcije", "embargo",
+    "kriza", "tenzije", "napetost", "neprijateljstvo", "konfrontacija",
+    "provokacija", "incident", "povreda", "kršenje", "opasnost",
+    "poraz", "gubitak", "povlačenje", "okupacija", "anneksija",
+    "terorizam", "atentat", "otmica", "taoci"
+  )
+)
+
+# Geopolitička neizvjesnost leksikon
+uncertainty_lexicon <- c(
+  # Neizvjesnost ishoda
+  "neizvjesno", "nesigurno", "nepredvidivo", "rizično", "opasno",
+  "upitno", "dvojbeno", "neodređeno", "nejasno", "komplicirano",
+  # Uvjetnost
+  "možda", "eventualno", "potencijalno", "moguće", "vjerojatno",
+  "ako", "ukoliko", "ovisno o", "pod uvjetom",
+  # Scenariji
+  "scenarij", "mogućnost", "opcija", "alternativa",
+  # Zabrinutost
+  "zabrinutost", "strah", "oprez", "upozorenje", "prijetnja",
+  "rizik", "opasnost", "ugroza",
+  # Čekanje
+  "čekanje", "odgoda", "zastoj", "pat pozicija", "zamrznuti sukob",
+  # Preispitivanje
+  "preispitivanje", "revizija", "promjena", "zaokret"
+)
+
+# Forward looking (prognostički) leksikon
+forward_lexicon <- c(
+  # Očekivanja
+  "očekuje se", "predviđa se", "prognozira se", "procjenjuje se",
+  "najavljuje", "planira", "namjerava", "priprema",
+  # Budućnost
+  "budući", "nadolazeći", "sljedeći", "uskoro", "ubrzo",
+  # Planiranje
+  "strategija", "plan", "cilj", "namjera", "pripreme",
+  # Scenariji
+  "scenarij", "mogući razvoj", "perspektiva", "izgled",
+  # Upozorenja
+  "upozorava", "prijeti", "najavljuje eskalaciju"
+)
+
+# Leksikon intenziteta sukoba
+intensity_lexicon <- list(
+  high = c(
+    # Visoki intenzitet
+    "značajan", "znatan", "drastičan", "snažan", "jak",
+    "masivan", "ogroman", "bezpresedan", "povijesni",
+    "razoran", "katastrofalan", "dramatičan", "žestok",
+    "totalni", "potpuni", "apsolutni", "neviđeni"
+  ),
+  moderate = c(
+    # Umjereni intenzitet
+    "umjeren", "ograničen", "lokaliziran", "taktički",
+    "povremeni", "sporadičan", "izolirani"
+  ),
+  low = c(
+    # Niski intenzitet
+    "minimalan", "simboličan", "marginalan", "slab",
+    "zanemariv", "manji", "lokalni"
+  )
+)
+
+# Leksikon vrsta aktera
+actor_lexicon <- list(
+  state = c(
+    "država", "vlada", "predsjednik", "premijer", "ministar",
+    "ministarstvo", "parlament", "vojska", "armija"
+  ),
+  nonstate = c(
+    "pobunjenici", "milicija", "teroristi", "militanti",
+    "ekstremisti", "separatisti", "gerilci", "plaćenici"
+  ),
+  international = c(
+    "UN", "NATO", "EU", "međunarodna zajednica", "koalicija",
+    "mirovne snage", "humanitarne organizacije"
+  )
+)
+
+cat("Definirano", length(sentiment_lexicon$positive), "deeskalacijskih i", 
+    length(sentiment_lexicon$negative), "eskalacijskih pojmova\n")
+cat("Definirano", length(uncertainty_lexicon), "neizvjesnost pojmova\n")
+cat("Definirano", length(forward_lexicon), "forward looking pojmova\n")
+```
+
+## Brojanje pojmova
+
+```{r count-terms}
+#| label: count-terms
+
+count_patterns <- function(text, patterns) {
+  if (is.na(text) || text == "") return(0)
+  text_lower <- tolower(text)
+  sum(sapply(patterns, function(p) {
+    tryCatch(stri_count_regex(text_lower, p), error = function(e) 0)
+  }))
+}
+
+# Broji sve kategorije iz taksonomije
+for (cat_name in names(flat_terms)) {
+  col_name <- paste0("geo_", cat_name)
+  dt[, (col_name) := sapply(FULL_TEXT, count_patterns, patterns = flat_terms[[cat_name]])]
+}
+
+# Agregatne mjere po makro kategorijama
+macro_categories <- unique(tax_summary$Makro_kategorija)
+
+for (macro in macro_categories) {
+  meso_cats <- tax_summary[Makro_kategorija == macro, Meso_kategorija]
+  col_names <- paste0("geo_", macro, "_", meso_cats)
+  existing_cols <- col_names[col_names %in% names(dt)]
+  if (length(existing_cols) > 0) {
+    dt[, paste0("macro_", macro) := rowSums(.SD, na.rm = TRUE), .SDcols = existing_cols]
+  }
+}
+
+# Sentiment scoring (eskalacija/deeskalacija)
+dt[, sent_deescalation := sapply(FULL_TEXT, count_patterns, patterns = sentiment_lexicon$positive)]
+dt[, sent_escalation := sapply(FULL_TEXT, count_patterns, patterns = sentiment_lexicon$negative)]
+dt[, sent_net := sent_deescalation - sent_escalation]
+dt[, sent_ratio := fifelse(sent_deescalation + sent_escalation > 0,
+                           (sent_deescalation - sent_escalation) / (sent_deescalation + sent_escalation), 0)]
+
+# Uncertainty scoring
+dt[, uncertainty := sapply(FULL_TEXT, count_patterns, patterns = uncertainty_lexicon)]
+
+# Forward looking scoring
+dt[, forward_looking := sapply(FULL_TEXT, count_patterns, patterns = forward_lexicon)]
+
+# Intensity scoring
+dt[, intensity_high := sapply(FULL_TEXT, count_patterns, patterns = intensity_lexicon$high)]
+dt[, intensity_low := sapply(FULL_TEXT, count_patterns, patterns = intensity_lexicon$low)]
+dt[, intensity_net := intensity_high - intensity_low]
+
+# Actor type scoring
+dt[, actor_state := sapply(FULL_TEXT, count_patterns, patterns = actor_lexicon$state)]
+dt[, actor_nonstate := sapply(FULL_TEXT, count_patterns, patterns = actor_lexicon$nonstate)]
+dt[, actor_international := sapply(FULL_TEXT, count_patterns, patterns = actor_lexicon$international)]
+
+# Ukupni geopolitički score
+geo_cols <- names(dt)[grepl("^geo_", names(dt))]
+dt[, geopolitical_total := rowSums(.SD, na.rm = TRUE), .SDcols = geo_cols]
+
+cat("Izračunato", length(geo_cols), "geopolitičkih varijabli\n")
+```
+
+# Konstrukcija indeksa
+
+## Mjesečna agregacija
+
+```{r monthly-aggregation}
+#| label: monthly-aggregation
+
+macro_cols <- names(dt)[grepl("^macro_", names(dt))]
+geo_cols_all <- c(geo_cols, macro_cols, "geopolitical_total",
+                  "sent_deescalation", "sent_escalation", "sent_net", "sent_ratio",
+                  "uncertainty", "forward_looking",
+                  "intensity_high", "intensity_low", "intensity_net",
+                  "actor_state", "actor_nonstate", "actor_international")
+
+monthly <- dt[, c(
+  .(N = .N,
+    total_words = sum(text_length, na.rm = TRUE),
+    avg_length = mean(text_length, na.rm = TRUE),
+    unique_sources = uniqueN(FROM)),
+  lapply(.SD, sum, na.rm = TRUE),
+  lapply(.SD, mean, na.rm = TRUE) |> setNames(paste0(names(.SD), "_avg"))
+), by = yearmonth, .SDcols = geo_cols_all][order(yearmonth)]
+
+# Izračunaj dodatne mjere
+monthly[, articles_per_source := N / unique_sources]
+
+cat("Agregirano", nrow(monthly), "mjeseci podataka\n")
+```
+
+## TF IDF ponderiranje
+
+```{r tfidf-weights}
+#| label: tfidf-weights
+
+calc_idf <- function(monthly_data, col_name) {
+  N <- nrow(monthly_data)
+  df <- sum(monthly_data[[col_name]] > 0, na.rm = TRUE)
+  if (df == 0) return(0)
+  log(N / df)
+}
+
+idf_weights <- sapply(macro_cols, function(col) calc_idf(monthly, col))
+idf_weights <- idf_weights / max(idf_weights, na.rm = TRUE)
+
+for (col in macro_cols) {
+  tfidf_col <- paste0(col, "_tfidf")
+  monthly[, (tfidf_col) := (get(col) / total_words) * idf_weights[col] * 1000]
+}
+
+tfidf_cols <- paste0(macro_cols, "_tfidf")
+
+idf_table <- data.table(
+  Kategorija = gsub("macro_", "", macro_cols),
+  IDF_weight = round(idf_weights, 3)
+)[order(-IDF_weight)]
+
+kable(idf_table, caption = "IDF težine po kategorijama (veća = diskriminativnija)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Definicija indeksa
+
+```{r construct-indices}
+#| label: construct-indices
+
+normalize_01 <- function(x) {
+  if (all(is.na(x))) return(rep(0.5, length(x)))
+  rng <- range(x, na.rm = TRUE)
+  if (rng[1] == rng[2]) return(rep(0.5, length(x)))
+  (x - rng[1]) / (rng[2] - rng[1])
+}
+
+standardize <- function(x) {
+  if (all(is.na(x))) return(rep(0, length(x)))
+  (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
+}
+
+# === INDEKS 1: Geopolitical Risk Index (GRI) ===
+# Ukupna geopolitička aktivnost normalizirana po broju članaka
+monthly[, GRI := normalize_01(geopolitical_total / N) * 100]
+
+# === INDEKS 2: Conflict Intensity Index (CII) ===
+# Fokus na sukobe i ratove
+conflict_cols <- c("macro_sukobi_ratovi", "macro_rusija_ukrajina", "macro_izrael_bliski_istok")
+conflict_cols <- conflict_cols[conflict_cols %in% names(monthly)]
+if (length(conflict_cols) > 0) {
+  monthly[, CII := normalize_01(rowSums(.SD / N, na.rm = TRUE)) * 100, .SDcols = conflict_cols]
+}
+
+# === INDEKS 3: Escalation Index (ESI) ===
+# Mjeri eskalaciju kroz sentiment (negativan = eskalacija)
+monthly[, ESI := normalize_01(-sent_ratio_avg) * 100]  # Invertirano: viši = više eskalacije
+
+# === INDEKS 4: Geopolitical Uncertainty Index (GUI) ===
+# Mjera neizvjesnosti u geopolitičkom kontekstu
+monthly[, GUI := normalize_01(uncertainty / N) * 100]
+
+# === INDEKS 5: Forward Looking Geopolitical Index (FGI) ===
+# Prognostička orijentacija geopolitičkog diskursa
+monthly[, FGI := normalize_01(forward_looking / N) * 100]
+
+# === INDEKS 6: Regional Tension Index za Istok (RTI_E) ===
+# Fokus na Rusija-Ukrajina
+rui_cols <- c("macro_rusija_ukrajina")
+rui_cols <- rui_cols[rui_cols %in% names(monthly)]
+if (length(rui_cols) > 0) {
+  monthly[, RTI_E := normalize_01(rowSums(.SD / N, na.rm = TRUE)) * 100, .SDcols = rui_cols]
+}
+
+# === INDEKS 7: Middle East Tension Index (METI) ===
+# Fokus na Bliski istok
+mei_cols <- c("macro_izrael_bliski_istok")
+mei_cols <- mei_cols[mei_cols %in% names(monthly)]
+if (length(mei_cols) > 0) {
+  monthly[, METI := normalize_01(rowSums(.SD / N, na.rm = TRUE)) * 100, .SDcols = mei_cols]
+}
+
+# === INDEKS 8: Western Alliance Index (WAI) ===
+# Aktivnost NATO/EU/zapadnih institucija
+wai_cols <- c("macro_nato_zapad")
+wai_cols <- wai_cols[wai_cols %in% names(monthly)]
+if (length(wai_cols) > 0) {
+  monthly[, WAI := normalize_01(rowSums(.SD / N, na.rm = TRUE)) * 100, .SDcols = wai_cols]
+}
+
+# === INDEKS 9: Military Activity Index (MAI) ===
+# Vojna aktivnost i oružje
+mai_cols <- c("macro_vojska_oruzje")
+mai_cols <- mai_cols[mai_cols %in% names(monthly)]
+if (length(mai_cols) > 0) {
+  monthly[, MAI := normalize_01(rowSums(.SD / N, na.rm = TRUE)) * 100, .SDcols = mai_cols]
+}
+
+# === INDEKS 10: Principal Component Index (PCI) ===
+pca_data <- monthly[, .SD, .SDcols = macro_cols]
+pca_data_complete <- pca_data[complete.cases(pca_data)]
+
+if (nrow(pca_data_complete) > 10 && ncol(pca_data_complete) > 2) {
+  pca_data_scaled <- scale(pca_data_complete)
+  pca_result <- prcomp(pca_data_scaled, scale. = FALSE)
+  
+  var_explained <- summary(pca_result)$importance[2, 1:min(5, ncol(pca_result$rotation))]
+  
+  pca_matrix <- as.matrix(pca_data)
+  pca_matrix[is.na(pca_matrix)] <- 0
+  pca_matrix_scaled <- scale(pca_matrix)
+  pc1_scores <- as.numeric(pca_matrix_scaled %*% pca_result$rotation[, 1])
+  
+  monthly[, PCI := normalize_01(pc1_scores) * 100]
+  
+  cat("PCA: PC1 objašnjava", round(var_explained[1] * 100, 1), "% varijance\n")
+} else {
+  monthly[, PCI := GRI]
+}
+
+# Klizni prosjeci
+index_cols <- c("GRI", "CII", "ESI", "GUI", "FGI", "RTI_E", "METI", "WAI", "MAI", "PCI")
+for (idx in index_cols) {
+  if (idx %in% names(monthly)) {
+    monthly[, paste0(idx, "_MA3") := frollmean(get(idx), n = 3, align = "center")]
+  }
+}
+
+cat("Konstruirano 10 geopolitičkih indeksa\n")
+```
+
+## Opis indeksa
+
+```{r index-descriptions}
+#| label: index-descriptions
+
+index_desc <- data.table(
+  Indeks = c("GRI", "CII", "ESI", "GUI", "FGI", "RTI_E", "METI", "WAI", "MAI", "PCI"),
+  Naziv = c(
+    "Geopolitical Risk Index",
+    "Conflict Intensity Index",
+    "Escalation Index",
+    "Geopolitical Uncertainty Index",
+    "Forward Looking Geopolitical Index",
+    "Regional Tension Index East",
+    "Middle East Tension Index",
+    "Western Alliance Index",
+    "Military Activity Index",
+    "Principal Component Index"
+  ),
+  Opis = c(
+    "Ukupna geopolitička aktivnost normalizirana po broju članaka",
+    "Intenzitet sukoba (Rusija/Ukrajina + Bliski Istok)",
+    "Razina eskalacije temeljena na omjeru eskalacijskih/deeskalacijskih pojmova",
+    "Mjera neizvjesnosti u geopolitičkom diskursu",
+    "Orijentacija na buduće događaje (prognoze, planovi, očekivanja)",
+    "Napetosti na istoku (fokus Rusija/Ukrajina)",
+    "Napetosti na Bliskom Istoku (Izrael, Hamas, Hezbollah, Iran)",
+    "Aktivnost zapadnih institucija (NATO, EU, SAD)",
+    "Vojna aktivnost i teme vezane uz oružje/vojsku",
+    "Prva glavna komponenta svih makro kategorija"
+  )
+)
+
+kable(index_desc, caption = "Pregled konstruiranih geopolitičkih indeksa") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+# Vizualizacija indeksa
+
+## Glavni indeksi
+
+```{r main-indices-plot}
+#| label: main-indices-plot
+#| fig-cap: "Glavni geopolitički indeksi"
+#| fig-height: 12
+
+p1 <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_line(aes(y = GRI, color = "GRI"), linewidth = 1) +
+  geom_line(aes(y = CII, color = "CII"), linewidth = 1) +
+  scale_color_manual(values = c("GRI" = pal$cool, "CII" = pal$highlight)) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Geopolitički rizik i intenzitet sukoba", x = NULL, y = "Indeks (0-100)", color = NULL) +
+  theme(legend.position = "bottom")
+
+p2 <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_ribbon(aes(ymin = 50, ymax = ESI), fill = pal$highlight, alpha = 0.3) +
+  geom_line(aes(y = ESI), color = pal$danger, linewidth = 1) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = pal$muted) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Escalation Index (ESI)", subtitle = "Iznad 50 = dominira eskalacijski diskurs",
+       x = NULL, y = "Indeks (0-100)")
+
+p3 <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_area(aes(y = GUI), fill = pal$purple, alpha = 0.5) +
+  geom_line(aes(y = GUI), color = pal$purple, linewidth = 1) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Geopolitical Uncertainty Index (GUI)", x = NULL, y = "Indeks (0-100)")
+
+p4 <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_line(aes(y = RTI_E, color = "Rusija/Ukrajina"), linewidth = 1) +
+  geom_line(aes(y = METI, color = "Bliski Istok"), linewidth = 1) +
+  scale_color_manual(values = c("Rusija/Ukrajina" = pal$cool, "Bliski Istok" = pal$warm)) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Regionalne napetosti", x = NULL, y = "Indeks (0-100)", color = NULL) +
+  theme(legend.position = "bottom")
+
+p1 / p2 / p3 / p4
+```
+
+## Vojna aktivnost i zapadni savezi
+
+```{r military-alliance-plot}
+#| label: military-alliance-plot
+#| fig-cap: "Vojna aktivnost i Zapadni savezi"
+#| fig-height: 6
+
+ggplot(monthly, aes(x = yearmonth)) +
+  geom_line(aes(y = MAI, color = "Vojna aktivnost"), linewidth = 1) +
+  geom_line(aes(y = WAI, color = "Zapadni savezi"), linewidth = 1) +
+  scale_color_manual(values = c("Vojna aktivnost" = pal$danger, "Zapadni savezi" = pal$cool)) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(
+    title = "Vojna aktivnost vs Zapadni savezi (NATO/EU/SAD)",
+    x = NULL, y = "Indeks (0-100)", color = NULL
+  ) +
+  theme(legend.position = "bottom")
+```
+
+## Principal Component Index
+
+```{r pci-plot}
+#| label: pci-plot
+#| fig-cap: "Principal Component Index s kliznim prosjekom"
+#| fig-height: 6
+
+ggplot(monthly, aes(x = yearmonth)) +
+  geom_col(aes(y = PCI), fill = pal$light, alpha = 0.7) +
+  geom_line(aes(y = PCI_MA3), color = pal$primary, linewidth = 1.2, na.rm = TRUE) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(
+    title = "Principal Component Index (PCI)",
+    subtitle = "Tamna linija = 3 mjesečni klizni prosjek",
+    x = NULL, y = "Indeks (0-100)"
+  )
+```
+
+# Regionalna i tematska analiza
+
+## Dinamika po regijama/temama
+
+```{r sector-dynamics}
+#| label: sector-dynamics
+#| fig-cap: "Dinamika geopolitičkih tema kroz vrijeme"
+#| fig-height: 16
+
+key_macro <- c("macro_sukobi_ratovi", "macro_rusija_ukrajina", "macro_izrael_bliski_istok",
+               "macro_nato_zapad", "macro_kina_azija", "macro_balkan",
+               "macro_vojska_oruzje", "macro_diplomacija",
+               "macro_terorizam_sigurnost", "macro_humanitarno")
+key_macro <- key_macro[key_macro %in% names(monthly)]
+
+sector_long <- melt(
+  monthly[, c("yearmonth", key_macro), with = FALSE],
+  id.vars = "yearmonth",
+  variable.name = "tema",
+  value.name = "vrijednost"
+)
+
+sector_long[, tema := gsub("macro_", "", tema)]
+sector_long[, vrijednost_norm := normalize_01(vrijednost) * 100, by = tema]
+
+# Ljepši nazivi
+tema_labels <- c(
+  sukobi_ratovi = "Sukobi i ratovi",
+  rusija_ukrajina = "Rusija/Ukrajina",
+  izrael_bliski_istok = "Izrael/Bliski Istok",
+  nato_zapad = "NATO/Zapad",
+  kina_azija = "Kina/Azija",
+  balkan = "Balkan",
+  vojska_oruzje = "Vojska/Oružje",
+  diplomacija = "Diplomacija",
+  terorizam_sigurnost = "Terorizam/Sigurnost",
+  humanitarno = "Humanitarno"
+)
+
+sector_long[, tema_label := tema_labels[tema]]
+
+ggplot(sector_long, aes(x = yearmonth, y = vrijednost_norm)) +
+  geom_area(fill = pal$accent, alpha = 0.3) +
+  geom_line(color = pal$primary, linewidth = 0.8) +
+  geom_smooth(method = "loess", se = FALSE, color = pal$highlight, linewidth = 1, span = 0.3) +
+  facet_wrap(~tema_label, ncol = 2, scales = "free_y") +
+  scale_x_date(date_breaks = "6 months", date_labels = "%b %y") +
+  labs(
+    title = "Dinamika geopolitičkih tema kroz vrijeme",
+    subtitle = "Normalizirane vrijednosti s LOESS trendom",
+    x = NULL, y = "Indeks (0-100)"
+  ) +
+  theme(
+    strip.text = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+## Heatmapa geopolitičke aktivnosti
+
+```{r sector-heatmap}
+#| label: sector-heatmap
+#| fig-cap: "Heatmapa geopolitičke aktivnosti"
+#| fig-height: 8
+
+heatmap_data <- sector_long[, .(yearmonth, tema_label, vrijednost_norm)]
+
+ggplot(heatmap_data, aes(x = yearmonth, y = tema_label, fill = vrijednost_norm)) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "plasma") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b %y") +
+  labs(
+    title = "Heatmapa geopolitičke medijske aktivnosti",
+    x = NULL, y = NULL, fill = "Intenzitet\n(0-100)"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Korelacijska struktura
+
+```{r correlation-matrix}
+#| label: correlation-matrix
+#| fig-cap: "Korelacijska matrica tema i indeksa"
+#| fig-height: 12
+
+cor_vars <- c(macro_cols, "GRI", "CII", "ESI", "GUI", "FGI", "RTI_E", "METI", "WAI", "MAI", "PCI")
+cor_vars <- cor_vars[cor_vars %in% names(monthly)]
+
+cor_data <- monthly[, .SD, .SDcols = cor_vars]
+cor_matrix <- cor(cor_data, use = "pairwise.complete.obs")
+
+rownames(cor_matrix) <- gsub("macro_", "", rownames(cor_matrix))
+colnames(cor_matrix) <- gsub("macro_", "", colnames(cor_matrix))
+
+corrplot(cor_matrix,
+         method = "color",
+         type = "upper",
+         order = "hclust",
+         tl.col = "black",
+         tl.srt = 45,
+         tl.cex = 0.6,
+         addCoef.col = "black",
+         number.cex = 0.4,
+         col = colorRampPalette(c(pal$cool, "white", pal$highlight))(100),
+         title = "Korelacijska matrica",
+         mar = c(0, 0, 2, 0))
+```
+
+# Eskalacija vs Deeskalacija analiza
+
+## Sentiment komponente
+
+```{r sentiment-components}
+#| label: sentiment-components
+#| fig-cap: "Eskalacija vs Deeskalacija kroz vrijeme"
+#| fig-height: 10
+
+p_sent1 <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_col(aes(y = sent_deescalation_avg), fill = pal$success, alpha = 0.7) +
+  geom_col(aes(y = -sent_escalation_avg), fill = pal$highlight, alpha = 0.7) +
+  geom_hline(yintercept = 0, color = "black") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Deeskalacija (gore) vs Eskalacija (dolje) pojmovi po članku",
+       x = NULL, y = "Prosječan broj pojmova")
+
+p_sent2 <- ggplot(monthly, aes(x = yearmonth, y = sent_ratio_avg)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = pal$muted) +
+  geom_area(aes(fill = sent_ratio_avg > 0), alpha = 0.5) +
+  geom_line(color = pal$primary, linewidth = 1) +
+  scale_fill_manual(values = c("TRUE" = pal$success, "FALSE" = pal$highlight), guide = "none") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Net sentiment ratio", subtitle = "(deeskalacija - eskalacija) / (deeskalacija + eskalacija)",
+       x = NULL, y = "Ratio (-1 do 1)")
+
+p_sent3 <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_line(aes(y = intensity_high / N * 100, color = "Visoki intenzitet"), linewidth = 1) +
+  geom_line(aes(y = intensity_low / N * 100, color = "Niski intenzitet"), linewidth = 1) +
+  scale_color_manual(values = c("Visoki intenzitet" = pal$highlight, "Niski intenzitet" = pal$cool)) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Intenzitet geopolitičkog jezika", x = NULL, y = "Pojmova na 100 članaka", color = NULL) +
+  theme(legend.position = "bottom")
+
+p_sent1 / p_sent2 / p_sent3
+```
+
+## Tipovi aktera
+
+```{r actor-types}
+#| label: actor-types
+#| fig-cap: "Tipovi aktera u geopolitičkom diskursu"
+#| fig-height: 6
+
+actor_data <- monthly[, .(
+  yearmonth,
+  Državni = actor_state / N * 100,
+  Nedržavni = actor_nonstate / N * 100,
+  Međunarodni = actor_international / N * 100
+)]
+
+actor_long <- melt(actor_data, id.vars = "yearmonth", variable.name = "Tip", value.name = "Frekvencija")
+
+ggplot(actor_long, aes(x = yearmonth, y = Frekvencija, fill = Tip)) +
+  geom_area(alpha = 0.7, position = "stack") +
+  scale_fill_manual(values = c("Državni" = pal$cool, "Nedržavni" = pal$highlight, "Međunarodni" = pal$success)) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(
+    title = "Tipovi aktera u geopolitičkom diskursu",
+    subtitle = "Relativna zastupljenost po tipu aktera",
+    x = NULL, y = "Pojmova na 100 članaka", fill = "Tip aktera"
+  ) +
+  theme(legend.position = "bottom")
+```
+
+## Uncertainty vs Escalation scatter
+
+```{r uncertainty-escalation-scatter}
+#| label: uncertainty-escalation-scatter
+#| fig-cap: "Odnos neizvjesnosti i eskalacije"
+#| fig-height: 6
+
+ggplot(monthly, aes(x = GUI, y = ESI)) +
+  geom_point(aes(size = N, color = yearmonth), alpha = 0.7) +
+  geom_smooth(method = "lm", se = TRUE, color = pal$primary) +
+  scale_color_viridis_c(option = "viridis", labels = function(x) format(as.Date(x, origin = "1970-01-01"), "%b %Y")) +
+  labs(
+    title = "Neizvjesnost vs Eskalacija",
+    x = "Geopolitical Uncertainty Index", y = "Escalation Index",
+    size = "Broj članaka", color = "Mjesec"
+  ) +
+  theme(legend.position = "right")
+```
+
+# Volatilnost i momentum
+
+```{r volatility-momentum}
+#| label: volatility-momentum
+#| fig-cap: "Volatilnost i momentum geopolitičkih indeksa"
+#| fig-height: 12
+
+# Volatilnost = rolling SD
+monthly[, GRI_vol := frollapply(GRI, n = 3, FUN = sd, align = "right")]
+monthly[, CII_vol := frollapply(CII, n = 3, FUN = sd, align = "right")]
+
+# Momentum = M/M promjena
+monthly[, GRI_mom := GRI - shift(GRI, 1)]
+monthly[, CII_mom := CII - shift(CII, 1)]
+
+# 3M momentum
+monthly[, GRI_mom3 := GRI - shift(GRI, 3)]
+
+p_vol <- ggplot(monthly[!is.na(GRI_vol)], aes(x = yearmonth)) +
+  geom_area(aes(y = GRI_vol), fill = pal$cool, alpha = 0.5) +
+  geom_line(aes(y = GRI_vol), color = pal$primary, linewidth = 1) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "GRI volatilnost (3M rolling SD)", x = NULL, y = "Standardna devijacija")
+
+p_mom <- ggplot(monthly[!is.na(GRI_mom)], aes(x = yearmonth)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = pal$muted) +
+  geom_col(aes(y = GRI_mom, fill = GRI_mom > 0), alpha = 0.7) +
+  scale_fill_manual(values = c("TRUE" = pal$highlight, "FALSE" = pal$success), guide = "none") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "GRI momentum (M/M promjena)", x = NULL, y = "Promjena")
+
+p_mom3 <- ggplot(monthly[!is.na(GRI_mom3)], aes(x = yearmonth)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = pal$muted) +
+  geom_area(aes(y = GRI_mom3, fill = GRI_mom3 > 0), alpha = 0.5) +
+  geom_line(aes(y = GRI_mom3), color = pal$primary, linewidth = 1) +
+  scale_fill_manual(values = c("TRUE" = pal$highlight, "FALSE" = pal$success), guide = "none") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "GRI 3 mjesečni momentum", x = NULL, y = "Promjena")
+
+p_combined <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_line(aes(y = scale(GRI)[,1], color = "GRI (std)"), linewidth = 1) +
+  geom_line(aes(y = scale(GUI)[,1], color = "GUI (std)"), linewidth = 1) +
+  geom_line(aes(y = scale(ESI)[,1], color = "ESI (std)"), linewidth = 1) +
+  scale_color_manual(values = c("GRI (std)" = pal$cool, "GUI (std)" = pal$purple, "ESI (std)" = pal$highlight)) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Standardizirani indeksi", x = NULL, y = "Z-score", color = NULL) +
+  theme(legend.position = "bottom")
+
+p_vol / p_mom / p_mom3 / p_combined
+```
+
+# Koncentracija tema
+
+```{r topic-concentration}
+#| label: topic-concentration
+#| fig-cap: "Koncentracija geopolitičkih tema"
+#| fig-height: 8
+
+calc_hhi <- function(values) {
+  values <- values[values > 0]
+  if (length(values) == 0) return(0)
+  shares <- values / sum(values)
+  sum(shares^2)
+}
+
+monthly[, topic_hhi := apply(.SD, 1, calc_hhi), .SDcols = macro_cols]
+monthly[, topic_count := rowSums(.SD > 0), .SDcols = macro_cols]
+
+p_hhi <- ggplot(monthly, aes(x = yearmonth, y = topic_hhi)) +
+  geom_line(color = pal$primary, linewidth = 1) +
+  geom_smooth(method = "loess", se = TRUE, color = pal$highlight, span = 0.3) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(
+    title = "Herfindahl indeks koncentracije tema",
+    subtitle = "Viši = fokus na manje tema (npr. jedan dominantan sukob) | Niži = disperzija",
+    x = NULL, y = "HHI"
+  )
+
+p_count <- ggplot(monthly, aes(x = yearmonth, y = topic_count)) +
+  geom_col(fill = pal$accent, alpha = 0.7) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Broj aktivnih geopolitičkih tema po mjesecu", x = NULL, y = "Broj tema")
+
+p_hhi / p_count
+```
+
+# Korelacije između indeksa
+
+```{r index-correlations}
+#| label: index-correlations
+
+index_cols_final <- c("GRI", "CII", "ESI", "GUI", "FGI", "RTI_E", "METI", "WAI", "MAI", "PCI")
+index_cols_final <- index_cols_final[index_cols_final %in% names(monthly)]
+
+index_cor <- cor(monthly[, .SD, .SDcols = index_cols_final], use = "pairwise.complete.obs")
+
+kable(round(index_cor, 3), caption = "Korelacijska matrica geopolitičkih indeksa") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+# Export
+
+```{r export-excel}
+#| label: export-excel
+
+wb <- createWorkbook()
+
+# Sheet 1: Glavni indeksi
+addWorksheet(wb, "Indeksi")
+export_indices <- monthly[, .(
+  Datum = yearmonth,
+  Broj_clanaka = N,
+  GRI, CII, ESI, GUI, FGI, RTI_E, METI, WAI, MAI, PCI,
+  GRI_MA3, CII_MA3, ESI_MA3
+)]
+writeData(wb, "Indeksi", export_indices)
+
+# Sheet 2: Regije i teme
+addWorksheet(wb, "Teme")
+export_sectors <- monthly[, c("yearmonth", macro_cols), with = FALSE]
+names(export_sectors) <- c("Datum", gsub("macro_", "", macro_cols))
+writeData(wb, "Teme", export_sectors)
+
+# Sheet 3: Eskalacija/Deeskalacija
+addWorksheet(wb, "Sentiment")
+export_sentiment <- monthly[, .(
+  Datum = yearmonth,
+  Deeskalacija = sent_deescalation,
+  Eskalacija = sent_escalation,
+  Net = sent_net,
+  Ratio = sent_ratio_avg,
+  Neizvjesnost = uncertainty,
+  Forward_looking = forward_looking,
+  Intenzitet_visoki = intensity_high,
+  Intenzitet_niski = intensity_low,
+  Akteri_drzavni = actor_state,
+  Akteri_nedrzavni = actor_nonstate,
+  Akteri_medjunarodni = actor_international
+)]
+writeData(wb, "Sentiment", export_sentiment)
+
+# Sheet 4: Volatilnost
+addWorksheet(wb, "Volatilnost")
+export_vol <- monthly[, .(
+  Datum = yearmonth,
+  GRI_volatilnost = GRI_vol,
+  GRI_momentum = GRI_mom,
+  GRI_momentum_3M = GRI_mom3,
+  Topic_HHI = topic_hhi
+)]
+writeData(wb, "Volatilnost", export_vol)
+
+# Stilovi
+header_style <- createStyle(
+  textDecoration = "bold",
+  fgFill = "#1a1a2e",
+  fontColour = "white",
+  halign = "center"
+)
+
+for (sheet in names(wb)) {
+  sheet_data <- switch(sheet,
+    "Indeksi" = export_indices,
+    "Teme" = export_sectors,
+    "Sentiment" = export_sentiment,
+    "Volatilnost" = export_vol
+  )
+  ncols <- ncol(sheet_data)
+  addStyle(wb, sheet, header_style, rows = 1, cols = 1:ncols, gridExpand = TRUE)
+  setColWidths(wb, sheet, cols = 1:ncols, widths = "auto")
+}
+
+output_path <- here("output", "geopolitical_indices.xlsx")
+dir.create(here("output"), showWarnings = FALSE, recursive = TRUE)
+saveWorkbook(wb, output_path, overwrite = TRUE)
+cat("Excel exportiran:", output_path, "\n")
+```
+
+# Sažetak
+
+```{r summary}
+#| label: summary
+
+summary_table <- data.table(
+  Metrika = c(
+    "Broj analiziranih članaka",
+    "Vremenski raspon",
+    "Broj geopolitičkih kategorija",
+    "Broj makro tema",
+    "Broj konstruiranih indeksa",
+    "Prosječni GRI",
+    "Prosječni ESI (eskalacija)",
+    "Prosječni GUI (neizvjesnost)"
+  ),
+  Vrijednost = c(
+    format(nrow(dt), big.mark = ","),
+    paste(format(date_min, "%m/%Y"), "-", format(date_max, "%m/%Y")),
+    length(geo_cols),
+    length(macro_cols),
+    length(index_cols_final),
+    round(mean(monthly$GRI, na.rm = TRUE), 1),
+    round(mean(monthly$ESI, na.rm = TRUE), 1),
+    round(mean(monthly$GUI, na.rm = TRUE), 1)
+  )
+)
+
+kable(summary_table, caption = "Sažetak geopolitičke analize") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+*Izvještaj generiran: `r Sys.time()`*
+
+*GIMES Research | Semantički indeks geopolitičke nestabilnosti v1.0*

@@ -14,7 +14,7 @@ message("Using ", getDTthreads(), " threads")
 # ------------------------------------------------------------------------------
 
 message("\n=== LOADING DATA ===")
-trust_articles <- readRDS("C:/Users/lsikic/Desktop/trust_articles.rds")
+#trust_articles <- readRDS("C:/Users/lsikic/Desktop/trust_articles.rds")
 
 if(!is.data.table(trust_articles)) {
   setDT(trust_articles)
@@ -435,7 +435,7 @@ dt_excel <- copy(dt_final)
 message("Saving all ", format(nrow(dt_excel), big.mark = ","), " rows to Excel...")
 
 # Truncate FULL_TEXT for Excel (too large)
-dt_excel[, FULL_TEXT := substr(FULL_TEXT, 1, 500)]
+#dt_excel[, FULL_TEXT := substr(FULL_TEXT, 1, 500)]
 write.xlsx(dt_excel, write_path_xlsx, overwrite = TRUE)
 message("Saved Excel: ", write_path_xlsx)
 

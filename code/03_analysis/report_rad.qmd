@@ -1,0 +1,1276 @@
+---
+title: "Semantički indeks tržišta rada"
+subtitle: "Mjerenje dinamike tržišta rada kroz analizu medijskog diskursa"
+author: "GIMES Research"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 4
+    toc-location: left
+    number-sections: true
+    theme: cosmo
+    code-fold: true
+    code-summary: "Prikaži kod"
+    fig-width: 11
+    fig-height: 7
+    df-print: paged
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+lang: hr
+---
+
+```{r setup}
+#| label: setup
+#| include: false
+
+library(data.table)
+library(ggplot2)
+library(scales)
+library(lubridate)
+library(stringi)
+library(knitr)
+library(kableExtra)
+library(zoo)
+library(openxlsx)
+library(here)
+library(corrplot)
+library(patchwork)
+library(viridis)
+
+options(scipen = 999)
+theme_set(theme_minimal(base_size = 12))
+
+pal <- list(
+  dark = "#1a1a2e",
+  primary = "#16213e",
+  accent = "#0f3460",
+  highlight = "#e94560",
+  warm = "#f39c12",
+  cool = "#3498db",
+  success = "#27ae60",
+  muted = "#7f8c8d",
+  light = "#ecf0f1",
+  purple = "#9b59b6",
+  teal = "#1abc9c"
+)
+```
+
+# Uvod
+
+Ovaj dokument konstruira semantičke indekse tržišta rada temeljene na analizi medijskog diskursa o zapošljavanju, plaćama, radnim uvjetima i povezanim temama.
+
+```{r load-data}
+#| label: load-data
+
+#dt <- as.data.table(read.xlsx(here("data", "labor_filtered.xlsx")))
+dt <- as.data.table(read.xlsx("C:/Users/lsikic/Desktop/labor_filtered.xlsx"))
+if (is.numeric(dt$DATE)) {
+  dt[, DATE := as.Date(DATE, origin = "1899-12-30")]
+} else {
+  dt[, DATE := as.Date(DATE)]
+}
+
+if ("text_length" %in% names(dt)) dt[, text_length := as.numeric(text_length)]
+if ("REACH" %in% names(dt)) dt[, REACH := as.numeric(REACH)]
+
+dt[, `:=`(
+  date = DATE,
+  year = year(DATE),
+  month = month(DATE),
+  quarter = quarter(DATE),
+  yearmonth = floor_date(DATE, "month"),
+  yearquarter = floor_date(DATE, "quarter")
+)]
+
+date_min <- min(dt$date, na.rm = TRUE)
+date_max <- max(dt$date, na.rm = TRUE)
+
+cat("Učitano", nrow(dt), "članaka\n")
+cat("Vremenski raspon:", as.character(date_min), "do", as.character(date_max), "\n")
+```
+
+# Eksploratorni pregled
+
+```{r basic-stats}
+#| label: basic-stats
+
+stats_summary <- data.table(
+  Metrika = c(
+    "Ukupan broj članaka",
+    "Vremenski raspon",
+    "Broj dana",
+    "Prosječno članaka dnevno",
+    "Broj izvora",
+    "Medijan duljine članka"
+  ),
+  Vrijednost = c(
+    format(nrow(dt), big.mark = ","),
+    paste(format(date_min, "%d.%m.%Y"), "do", format(date_max, "%d.%m.%Y")),
+    as.character(as.numeric(date_max - date_min)),
+    round(nrow(dt) / as.numeric(date_max - date_min), 2),
+    length(unique(dt$FROM)),
+    format(median(dt$text_length, na.rm = TRUE), big.mark = ",")
+  )
+)
+
+kable(stats_summary, caption = "Osnovne statistike dataseta") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r source-distribution}
+#| label: source-distribution
+#| fig-cap: "Top 20 izvora po broju članaka"
+
+top_sources <- dt[, .(N = .N), by = FROM][order(-N)][1:20]
+
+ggplot(top_sources, aes(x = reorder(FROM, N), y = N)) +
+  geom_col(fill = pal$primary, alpha = 0.8) +
+  geom_text(aes(label = format(N, big.mark = ",")), hjust = -0.1, size = 3) +
+  coord_flip() +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(title = "Top 20 izvora po broju članaka", x = NULL, y = "Broj članaka") +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+```{r time-distribution}
+#| label: time-distribution
+#| fig-cap: "Mjesečni broj članaka"
+#| fig-height: 6
+
+monthly_count <- dt[, .(N = .N), by = yearmonth][order(yearmonth)]
+monthly_count[, MA3 := frollmean(N, n = 3, align = "center")]
+
+ggplot(monthly_count, aes(x = yearmonth)) +
+  geom_col(aes(y = N), fill = pal$light, alpha = 0.7) +
+  geom_line(aes(y = MA3), color = pal$highlight, linewidth = 1.2, na.rm = TRUE) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(
+    title = "Mjesečni broj članaka o tržištu rada",
+    subtitle = "Crvena linija = 3 mjesečni klizni prosjek",
+    x = NULL, y = "Broj članaka"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+# Semantička taksonomija tržišta rada
+
+## Hijerarhijska struktura pojmova
+
+```{r semantic-taxonomy}
+#| label: semantic-taxonomy
+
+labor_taxonomy <- list(
+  
+  # === 1. ZAPOSLENOST I NEZAPOSLENOST ===
+  zaposlenost = list(
+    zaposlenost_opce = c(
+      "zaposlenost[aeiou]?", "zaposlen[aeiou]+",
+      "broj.{0,10}zaposlen", "stopa.{0,10}zaposlen",
+      "razina.{0,10}zaposlen", "puna.{0,10}zaposlen"
+    ),
+    nezaposlenost = c(
+      "nezaposlenost[aeiou]?", "nezaposlen[aeiou]+",
+      "stopa.{0,10}nezaposlen", "razina.{0,10}nezaposlen",
+      "evidencij[aeiou]+.{0,10}nezaposlen", "broj.{0,10}nezaposlen",
+      "dugotrajn[aeiou]+.{0,10}nezaposlen"
+    ),
+    hzz = c(
+      "\\bHZZ\\b", "Hrvatski.{0,10}zavod.{0,10}zapo[sš]ljavanje",
+      "zavod.{0,10}zapo[sš]ljavanje", "burza.{0,10}rada"
+    ),
+    anketna = c(
+      "anketn[aeiou]+.{0,10}nezaposlen", "anketn[aeiou]+.{0,10}zaposlen",
+      "ILO.{0,10}metod", "me[dđ]unarod.{0,10}definicij"
+    )
+  ),
+  
+  # === 2. PLAĆE I PRIMANJA ===
+  place = list(
+    place_opce = c(
+      "pla[cć][aeiou]?", "primanj[aeiou]?", "zarad[aeiou]?",
+      "dohodak", "dohod[aeikou]+", "prihod.{0,10}rad"
+    ),
+    prosjecna_placa = c(
+      "prosje[cč]n[aeiou]+.{0,10}pla[cć]", "srednja.{0,10}pla[cć]",
+      "medijan.{0,10}pla[cć]"
+    ),
+    minimalna_placa = c(
+      "minimaln[aeiou]+.{0,10}pla[cć]", "minimalac",
+      "najni[zž][aeiou]+.{0,10}pla[cć]", "minimalna.{0,10}satnica"
+    ),
+    neto_bruto = c(
+      "neto.{0,10}pla[cć]", "bruto.{0,10}pla[cć]",
+      "neto.{0,10}primanj", "bruto.{0,10}primanj"
+    ),
+    rast_place = c(
+      "rast.{0,10}pla[cć]", "pove[cć]anje.{0,10}pla[cć]",
+      "porast.{0,10}pla[cć]", "povi[sš]ic[aeiou]?",
+      "revaloriza[cč]ij", "uskla[dđ]ivanj[aeu]?.{0,10}pla[cć]"
+    ),
+    realna_placa = c(
+      "realn[aeiou]+.{0,10}pla[cć]", "kupovn[aeiou]+.{0,10}mo[cć]",
+      "inflacij[aeiou]?.{0,10}pla[cć]", "pla[cć][aeiou]?.{0,10}inflacij"
+    )
+  ),
+  
+  # === 3. ZAPOŠLJAVANJE I OTPUŠTANJE ===
+  dinamika_rada = list(
+    zaposljavanje = c(
+      "zapo[sš]ljavanje", "zapo[sš]ljavanj[aeu]?",
+      "novo.{0,10}zaposlen", "primanj[aeu]?.{0,10}radn",
+      "nova.{0,10}radna.{0,10}mjesta?"
+    ),
+    otpustanje = c(
+      "otpu[sš]tanj[aeiou]?", "otkaziv", "otkaz[aeiou]?",
+      "gubitak.{0,10}posla?", "vi[sš]ak.{0,10}radn",
+      "smanjivanje.{0,10}broja.{0,10}zaposlen"
+    ),
+    oglasi_posao = c(
+      "oglas[aeiou]?.{0,10}posao", "oglas[aeiou]?.{0,10}rad",
+      "natje[cč]aj.{0,10}posao", "slobodn[aeiou]+.{0,10}radn[aeiou]+.{0,10}mjest",
+      "tra[zž]i.{0,10}se.{0,10}radn"
+    ),
+    fluktuacija = c(
+      "fluktuacij[aeiou]?", "rotacij[aeiou]+.{0,10}zaposlen",
+      "odljev.{0,10}kadr", "zadržavanje.{0,10}zaposlen"
+    )
+  ),
+  
+  # === 4. RADNI ODNOSI ===
+  radni_odnosi = list(
+    ugovor_rad = c(
+      "ugovor.{0,10}rad[aeu]?", "radn[aeiou]+.{0,10}odnos",
+      "neodre[dđ]en[aeiou]+.{0,10}vrijemae?", "odre[dđ]en[aeiou]+.{0,10}vrijeme"
+    ),
+    sindikati = c(
+      "sindikat[aeiou]?", "sindikaln[aeiou]+",
+      "kolektiv.{0,10}ugovor", "kolektiv.{0,10}pregovar",
+      "reprezentativnost"
+    ),
+    strajk = c(
+      "[sš]trajk[aeiou]?", "obustav[aeiou]+.{0,10}rad",
+      "protest[aeiou]?.{0,10}radn", "industrijska.{0,10}akcij"
+    ),
+    socijalni_dijalog = c(
+      "socijalni.{0,10}dijalog", "socijalni.{0,10}partner",
+      "tripartit", "\\bGSV\\b", "Gospodarsk.{0,10}socijalno.{0,10}vije[cć]"
+    )
+  ),
+  
+  # === 5. UVJETI RADA ===
+  uvjeti_rada = list(
+    radno_vrijeme = c(
+      "radn[aeiou]+.{0,10}vrijeme", "radni.{0,10}sat[aeiou]?",
+      "prekovremeni?.{0,10}rad", "no[cć]ni.{0,10}rad",
+      "smjenski.{0,10}rad", "fleksibiln.{0,10}rad"
+    ),
+    rad_od_kuce = c(
+      "rad.{0,10}od.{0,10}ku[cć]e", "rad.{0,10}na.{0,10}dalj",
+      "remote.{0,10}work", "home.{0,10}office",
+      "hibridn[aeiou]+.{0,10}rad", "teleton"
+    ),
+    sigurnost_rad = c(
+      "sigurnost.{0,10}rad[aeu]?", "za[sš]tit[aeiou]+.{0,10}rad[aeu]?",
+      "ozljed[aeiou]+.{0,10}rad[aeu]?", "nesre[cć][aeiou]+.{0,10}rad[aeu]?"
+    ),
+    bolovanje = c(
+      "bolovanj[aeiou]?", "privremena.{0,10}nesposobnost",
+      "bolnički.{0,10}sta[zž]"
+    )
+  ),
+  
+  # === 6. DEMOGRAFIJA RADNE SNAGE ===
+  demografija = list(
+    radna_snaga = c(
+      "radn[aeiou]+.{0,10}snag[aeiou]?", "radna.{0,10}populacija",
+      "radno.{0,10}sposobn[aeiou]+", "aktivn[aeiou]+.{0,10}stanovni[sš]tv"
+    ),
+    migracije = c(
+      "emigracij[aeiou]?", "iseljavanje", "odlazak.{0,10}mlad",
+      "odljev.{0,10}mozgov", "brain.{0,10}drain"
+    ),
+    strani_radnici = c(
+      "stran[aeiou]+.{0,10}radn[aeiou]+", "uvoz.{0,10}radn",
+      "radn[aeiou]+.{0,10}dozvol", "kvota?.{0,10}stran.{0,10}radn",
+      "sezonski.{0,10}radn"
+    ),
+    starenje = c(
+      "starenj[aeiou]+.{0,10}radne.{0,10}snage",
+      "starij[aeiou]+.{0,10}radn", "demografski.{0,10}izazov",
+      "odr[zž]ivost.{0,10}mirovins"
+    )
+  ),
+  
+  # === 7. OBRAZOVANJE I KVALIFIKACIJE ===
+  obrazovanje = list(
+    kvalifikacije = c(
+      "kvalifikacij[aeiou]?", "stru[cč]n[aeiou]+.{0,10}sprem",
+      "obrazovn[aeiou]+.{0,10}struktur", "razin[aeiou]+.{0,10}obrazovanj"
+    ),
+    vjestine = c(
+      "vje[sš]tin[aeiou]?", "kompetencij[aeiou]?",
+      "skills?", "znanj[aeiou]?", "sposobnost[aeiou]?"
+    ),
+    prekvalifikacija = c(
+      "prekvalifikacij[aeiou]?", "dokvalifikacij[aeiou]?",
+      "cjelo[zž]ivotn[aeiou]+.{0,10}u[cč]enje", "usavr[sš]avanj"
+    ),
+    neuskladenost = c(
+      "neuskla[dđ]enost", "skill.{0,10}gap", "skill.{0,10}mismatch",
+      "manjak.{0,10}kadrova?", "nedostat[aeikou]+.{0,10}radn"
+    )
+  ),
+  
+  # === 8. SEKTORI I ZANIMANJA ===
+  sektori = list(
+    javni_sektor = c(
+      "javn[aeiou]+.{0,10}sektor", "dr[zž]avn[aeiou]+.{0,10}slu[zž]b",
+      "javn[aeiou]+.{0,10}slu[zž]b", "dr[zž]avn[aeiou]+.{0,10}slu[zž]beni"
+    ),
+    privatni_sektor = c(
+      "privatn[aeiou]+.{0,10}sektor", "poduzetni[sš]tvo",
+      "privatn[aeiou]+.{0,10}poslodav"
+    ),
+    deficitarna_zanimanja = c(
+      "deficitarn[aeiou]+.{0,10}zanimanj", "tra[zž]en[aeiou]+.{0,10}zanimanj",
+      "nedostat[aeikou]+.{0,10}kadr", "\\bIT\\b.{0,10}kadr",
+      "stru[cč]njak.{0,10}nedostaj"
+    ),
+    turisticki_sektor = c(
+      "sezonski.{0,10}radn", "turizam.{0,10}zaposlen",
+      "ugostiteljstv.{0,10}radn", "sezon.{0,10}zapo[sš]ljavanje"
+    )
+  ),
+  
+  # === 9. SOCIJALNA ZAŠTITA ===
+  socijalna_zastita = list(
+    mirovine = c(
+      "mirovin[aeiou]?", "umirovljenj[aeiou]?",
+      "mirovinski.{0,10}sustav", "mirovinski.{0,10}fond",
+      "mirovinski.{0,10}stup", "\\bHZMO\\b"
+    ),
+    naknade = c(
+      "naknada.{0,10}nezaposlen", "socijalna.{0,10}pomo[cć]",
+      "nov[cč]ana.{0,10}naknada", "potpora?.{0,10}nezaposlen"
+    ),
+    doprinosi = c(
+      "doprinos[aeiou]?", "porez.{0,10}dohodak",
+      "porezn[aeiou]+.{0,10}optere[cć]enje", "porezni.{0,10}klin"
+    )
+  ),
+  
+  # === 10. PRODUKTIVNOST I KONKURENTNOST ===
+  produktivnost = list(
+    produktivnost_rada = c(
+      "produktivnost[aeiou]?", "produktivnost.{0,10}rad[aeu]?",
+      "u[cč]inkovitost.{0,10}rad[aeu]?", "efik[aeiou]+snost"
+    ),
+    konkurentnost = c(
+      "konkurentnost[aeiou]?", "konkuren[cč][aeiou]+",
+      "tr[zž]i[sš]n[aeiou]+.{0,10}pozicij"
+    ),
+    automatizacija = c(
+      "automatizacij[aeiou]?", "robotizacij[aeiou]?",
+      "digitalizacij[aeiou]+.{0,10}rad", "\\bAI\\b.{0,10}rad",
+      "tehnolo[sš]k[aeiou]+.{0,10}nezaposlen"
+    )
+  ),
+  
+  # === 11. RANJIVE SKUPINE ===
+  ranjive_skupine = list(
+    mladi = c(
+      "nezaposlen.{0,10}mlad", "mlad[aeiou]+.{0,10}nezaposlen",
+      "prvo.{0,10}zaposlenje", "pripravni[sš]tvo",
+      "student.{0,10}rad", "\\bNEET\\b"
+    ),
+    zene = c(
+      "[zž]en[aeiou]+.{0,10}zaposlen", "rodn[aeiou]+.{0,10}jaz",
+      "gender.{0,10}gap", "majke?.{0,10}zaposlen",
+      "[zž]en[aeiou]+.{0,10}tr[zž]i[sš]t[aeu]+.{0,10}rad"
+    ),
+    osobe_invaliditetom = c(
+      "osob[aeiou]+.{0,10}invaliditet", "osob[aeiou]+.{0,10}s.{0,5}te[sš]ko[cć]",
+      "zapo[sš]ljavanje.{0,10}invalid", "kvota?.{0,10}invalid"
+    ),
+    dugotrajno_nezaposleni = c(
+      "dugotrajn[aeiou]+.{0,10}nezaposlen",
+      "dulje.{0,10}od.{0,10}godin.{0,10}nezaposlen"
+    )
+  ),
+  
+  # === 12. INSTITUCIJE I POLITIKE ===
+  institucije = list(
+    ministarstvo = c(
+      "ministarstvo.{0,10}rada?", "ministar.{0,10}rada?",
+      "ministarstvo.{0,10}socijalne?"
+    ),
+    zakonodavstvo = c(
+      "zakon.{0,10}rad[aeu]?", "radn[aeiou]+.{0,10}zakonodavstv",
+      "izmjen[aeiou]+.{0,10}zakon.{0,10}rad", "ZOR"
+    ),
+    aktivna_politika = c(
+      "aktivn[aeiou]+.{0,10}politika?.{0,10}zapo[sš]ljavanje",
+      "mjer[aeiou]+.{0,10}zapo[sš]ljavanje", "poticaj.{0,10}zapo[sš]ljavanje",
+      "subvencij[aeiou]+.{0,10}zapo[sš]ljavanje", "samozapo[sš]ljavanje"
+    ),
+    eu_fondovi = c(
+      "\\bESF\\b", "Europski.{0,10}socijalni.{0,10}fond",
+      "EU.{0,10}fondov.{0,10}zapo[sš]ljavanje"
+    )
+  )
+)
+
+flatten_taxonomy <- function(taxonomy) {
+  result <- list()
+  for (macro in names(taxonomy)) {
+    for (meso in names(taxonomy[[macro]])) {
+      key <- paste0(macro, "_", meso)
+      result[[key]] <- taxonomy[[macro]][[meso]]
+    }
+  }
+  result
+}
+
+flat_terms <- flatten_taxonomy(labor_taxonomy)
+
+tax_summary <- rbindlist(lapply(names(labor_taxonomy), function(macro) {
+  rbindlist(lapply(names(labor_taxonomy[[macro]]), function(meso) {
+    data.table(
+      Makro_kategorija = macro,
+      Meso_kategorija = meso,
+      Broj_pojmova = length(labor_taxonomy[[macro]][[meso]])
+    )
+  }))
+}))
+
+kable(tax_summary, caption = "Struktura semantičke taksonomije tržišta rada") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Sentiment i neizvjesnost leksikoni
+
+```{r sentiment-uncertainty-lexicons}
+#| label: sentiment-uncertainty-lexicons
+
+# Labor market sentiment leksikon (pozitivno/negativno)
+labor_sentiment_lexicon <- list(
+  positive = c(
+    "rast zaposlenosti", "nova radna mjesta", "zapošljavanje", "povećanje plaća",
+    "rast plaća", "povišica", "napredovanje", "unapređenje", "stabilnost",
+    "pad nezaposlenosti", "smanjenje nezaposlenosti", "oporavak tržišta rada",
+    "deficitarna zanimanja", "traženi kadrovi", "konkurentne plaće",
+    "poboljšanje uvjeta", "socijalni dijalog", "dogovor", "sporazum",
+    "otvaranje radnih mjesta", "investicije", "širenje poslovanja",
+    "zapošljava", "traži radnike", "nedostaje radnika", "produktivnost raste"
+  ),
+  negative = c(
+    "pad zaposlenosti", "rast nezaposlenosti", "otpuštanje", "otkazi",
+    "gubitak posla", "višak radnika", "smanjenje plaća", "rezanje troškova",
+    "zatvaranje", "stečaj", "bankrot", "likvidacija", "restrukturiranje",
+    "štrajk", "obustava rada", "prosvjed", "nesigurnost zaposlenja",
+    "prekarni rad", "siva ekonomija", "rad na crno", "neplaćeni prekovremeni",
+    "iseljavanje", "odljev mozgova", "emigracija", "nedostatak perspektive",
+    "diskriminacija", "mobbing", "zlostavljanje na radu"
+  )
+)
+
+# Labor market uncertainty leksikon
+labor_uncertainty_lexicon <- c(
+  "neizvjesnost", "nesigurnost", "rizik", "nestabilnost", "volatilnost",
+  "mogući otkazi", "potencijalno otpuštanje", "upitno", "nejasno",
+  "pregovori", "štrajk u najavi", "mogući štrajk", "tenzije",
+  "restrukturiranje", "reorganizacija", "spajanje", "akvizicija",
+  "automatizacija", "robotizacija", "zamjena radnika",
+  "sezonalnost", "privremeni ugovor", "istječe ugovor",
+  "kriza", "recesija", "usporavanje"
+)
+
+# Labor market forward looking leksikon
+labor_forward_lexicon <- c(
+  "planira zaposliti", "namjerava zaposliti", "otvorit će radna mjesta",
+  "očekuje se rast", "prognoza zaposlenosti", "plan zapošljavanja",
+  "strategija zapošljavanja", "buduća potražnja", "trendovi zapošljavanja",
+  "sljedeće godine", "iduće sezone", "očekivana plaća",
+  "projekcije", "scenariji", "planovi širenja", "investicijski planovi",
+  "reforma tržišta rada", "novi zakon o radu", "promjene u regulativi"
+)
+
+# Labor market intensity leksikon
+labor_intensity_lexicon <- list(
+  high = c(
+    "značajan rast", "drastično povećanje", "rekordan broj",
+    "masovna otpuštanja", "drastično smanjenje", "kritičan nedostatak",
+    "alarmantno", "hitno", "izvanredno", "najviše u povijesti",
+    "najniže ikad", "eksplozivan rast", "kolaps"
+  ),
+  moderate = c(
+    "umjeren rast", "blagi porast", "postupno povećanje",
+    "stabilno", "konstantno", "uobičajeno", "prosječno",
+    "u skladu s očekivanjima", "normalizirano"
+  ),
+  low = c(
+    "minimalan", "zanemariv", "neznatan", "marginalan",
+    "simboličan", "tek neznatno", "jedva primjetan"
+  )
+)
+
+cat("Definirano", length(labor_sentiment_lexicon$positive), "pozitivnih i", 
+    length(labor_sentiment_lexicon$negative), "negativnih labor sentiment pojmova\n")
+cat("Definirano", length(labor_uncertainty_lexicon), "labor neizvjesnost pojmova\n")
+cat("Definirano", length(labor_forward_lexicon), "labor forward looking pojmova\n")
+```
+
+## Brojanje pojmova
+
+```{r count-terms}
+#| label: count-terms
+
+count_patterns <- function(text, patterns) {
+  if (is.na(text) || text == "") return(0)
+  text_lower <- tolower(text)
+  sum(sapply(patterns, function(p) {
+    tryCatch(stri_count_regex(text_lower, p), error = function(e) 0)
+  }))
+}
+
+# Broji sve kategorije iz taksonomije
+for (cat_name in names(flat_terms)) {
+  col_name <- paste0("sem_", cat_name)
+  dt[, (col_name) := sapply(FULL_TEXT, count_patterns, patterns = flat_terms[[cat_name]])]
+}
+
+# Agregatne mjere po makro kategorijama
+macro_categories <- unique(tax_summary$Makro_kategorija)
+
+for (macro in macro_categories) {
+  meso_cats <- tax_summary[Makro_kategorija == macro, Meso_kategorija]
+  col_names <- paste0("sem_", macro, "_", meso_cats)
+  existing_cols <- col_names[col_names %in% names(dt)]
+  if (length(existing_cols) > 0) {
+    dt[, paste0("macro_", macro) := rowSums(.SD, na.rm = TRUE), .SDcols = existing_cols]
+  }
+}
+
+# Sentiment scoring
+dt[, sent_positive := sapply(FULL_TEXT, count_patterns, patterns = labor_sentiment_lexicon$positive)]
+dt[, sent_negative := sapply(FULL_TEXT, count_patterns, patterns = labor_sentiment_lexicon$negative)]
+dt[, sent_net := sent_positive - sent_negative]
+dt[, sent_ratio := fifelse(sent_positive + sent_negative > 0,
+                           (sent_positive - sent_negative) / (sent_positive + sent_negative), 0)]
+
+# Uncertainty scoring
+dt[, uncertainty := sapply(FULL_TEXT, count_patterns, patterns = labor_uncertainty_lexicon)]
+
+# Forward looking scoring
+dt[, forward_looking := sapply(FULL_TEXT, count_patterns, patterns = labor_forward_lexicon)]
+
+# Intensity scoring
+dt[, intensity_high := sapply(FULL_TEXT, count_patterns, patterns = labor_intensity_lexicon$high)]
+dt[, intensity_low := sapply(FULL_TEXT, count_patterns, patterns = labor_intensity_lexicon$low)]
+dt[, intensity_net := intensity_high - intensity_low]
+
+# Ukupni semantički score
+sem_cols <- names(dt)[grepl("^sem_", names(dt))]
+dt[, semantic_total := rowSums(.SD, na.rm = TRUE), .SDcols = sem_cols]
+
+cat("Izračunato", length(sem_cols), "semantičkih varijabli\n")
+```
+
+# Konstrukcija indeksa
+
+## Mjesečna agregacija
+
+```{r monthly-aggregation}
+#| label: monthly-aggregation
+
+macro_cols <- names(dt)[grepl("^macro_", names(dt))]
+sem_cols_all <- c(sem_cols, macro_cols, "semantic_total",
+                  "sent_positive", "sent_negative", "sent_net", "sent_ratio",
+                  "uncertainty", "forward_looking",
+                  "intensity_high", "intensity_low", "intensity_net")
+
+monthly <- dt[, c(
+  .(N = .N,
+    total_words = sum(text_length, na.rm = TRUE),
+    avg_length = mean(text_length, na.rm = TRUE),
+    unique_sources = uniqueN(FROM)),
+  lapply(.SD, sum, na.rm = TRUE),
+  lapply(.SD, mean, na.rm = TRUE) |> setNames(paste0(names(.SD), "_avg"))
+), by = yearmonth, .SDcols = sem_cols_all][order(yearmonth)]
+
+# Izračunaj dodatne mjere
+monthly[, articles_per_source := N / unique_sources]
+
+cat("Agregirano", nrow(monthly), "mjeseci podataka\n")
+```
+
+## TF IDF ponderiranje
+
+```{r tfidf-weights}
+#| label: tfidf-weights
+
+# Izračunaj IDF za svaku kategoriju
+calc_idf <- function(monthly_data, col_name) {
+  N <- nrow(monthly_data)
+  df <- sum(monthly_data[[col_name]] > 0, na.rm = TRUE)
+  if (df == 0) return(0)
+  log(N / df)
+}
+
+idf_weights <- sapply(macro_cols, function(col) calc_idf(monthly, col))
+idf_weights <- idf_weights / max(idf_weights, na.rm = TRUE)
+
+# TF-IDF ponderirani score za svaki mjesec
+for (col in macro_cols) {
+  tfidf_col <- paste0(col, "_tfidf")
+  monthly[, (tfidf_col) := (get(col) / total_words) * idf_weights[col] * 1000]
+}
+
+tfidf_cols <- paste0(macro_cols, "_tfidf")
+
+idf_table <- data.table(
+  Kategorija = gsub("macro_", "", macro_cols),
+  IDF_weight = round(idf_weights, 3)
+)[order(-IDF_weight)]
+
+kable(idf_table, caption = "IDF težine po kategorijama (veća = diskriminativnija)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Definicija labor indeksa
+
+```{r construct-indices}
+#| label: construct-indices
+
+normalize_01 <- function(x) {
+  if (all(is.na(x))) return(rep(0.5, length(x)))
+  rng <- range(x, na.rm = TRUE)
+  if (rng[1] == rng[2]) return(rep(0.5, length(x)))
+  (x - rng[1]) / (rng[2] - rng[1])
+}
+
+standardize <- function(x) {
+  if (all(is.na(x))) return(rep(0, length(x)))
+  (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
+}
+
+# === INDEKS 1: Labor Volume Index (LVI) ===
+# Ukupni volumen medijske pokrivenosti tržišta rada
+monthly[, LVI := normalize_01(semantic_total / N) * 100]
+
+# === INDEKS 2: Employment Dynamics Index (EDI) ===
+# Kombinira zaposlenost i dinamiku tržišta rada
+emp_cols <- c("macro_zaposlenost", "macro_dinamika_rada")
+emp_cols <- emp_cols[emp_cols %in% names(monthly)]
+if (length(emp_cols) > 0) {
+  monthly[, EDI := normalize_01(rowMeans(.SD / N, na.rm = TRUE)) * 100, .SDcols = emp_cols]
+}
+
+# === INDEKS 3: Wage Pressure Index (WPI) ===
+# Fokusiran na plaće i primanja
+if ("macro_place" %in% names(monthly)) {
+  monthly[, WPI := normalize_01(macro_place / N) * 100]
+}
+
+# === INDEKS 4: Labor Market Tightness Index (LMTI) ===
+# Kombinira nedostatak radnika, deficitarna zanimanja, strani radnici
+tight_patterns <- c("sem_demografija_strani_radnici", "sem_sektori_deficitarna_zanimanja", 
+                    "sem_obrazovanje_neuskladenost")
+tight_patterns <- tight_patterns[tight_patterns %in% names(monthly)]
+if (length(tight_patterns) > 0) {
+  monthly[, LMTI := normalize_01(rowSums(.SD / N, na.rm = TRUE)) * 100, .SDcols = tight_patterns]
+}
+
+# === INDEKS 5: Labor Sentiment Index (LSI) ===
+# Sentiment prilagođen za tržište rada
+monthly[, LSI := normalize_01(semantic_total / N * (1 + sent_ratio_avg)) * 100]
+
+# === INDEKS 6: Labor Uncertainty Index (LUI) ===
+# Mjera neizvjesnosti na tržištu rada
+monthly[, LUI := normalize_01(uncertainty / N) * 100]
+
+# === INDEKS 7: Labor Forward Looking Index (LFLI) ===
+# Orijentacija na budućnost
+monthly[, LFLI := normalize_01(forward_looking / N) * 100]
+
+# === INDEKS 8: Social Protection Index (SPI) ===
+# Fokus na socijalnu zaštitu i mirovine
+if ("macro_socijalna_zastita" %in% names(monthly)) {
+  monthly[, SPI := normalize_01(macro_socijalna_zastita / N) * 100]
+}
+
+# === INDEKS 9: Labor Relations Index (LRI) ===
+# Radni odnosi, sindikati, štrajkovi
+if ("macro_radni_odnosi" %in% names(monthly)) {
+  monthly[, LRI := normalize_01(macro_radni_odnosi / N) * 100]
+}
+
+# === INDEKS 10: Vulnerable Groups Index (VGI) ===
+# Ranjive skupine na tržištu rada
+if ("macro_ranjive_skupine" %in% names(monthly)) {
+  monthly[, VGI := normalize_01(macro_ranjive_skupine / N) * 100]
+}
+
+# === INDEKS 11: Principal Component Index (PCI) ===
+pca_data <- monthly[, .SD, .SDcols = macro_cols]
+pca_data_complete <- pca_data[complete.cases(pca_data)]
+
+if (nrow(pca_data_complete) > 10 && ncol(pca_data_complete) > 2) {
+  pca_data_scaled <- scale(pca_data_complete)
+  pca_result <- prcomp(pca_data_scaled, scale. = FALSE)
+  
+  var_explained <- summary(pca_result)$importance[2, 1:min(5, ncol(pca_result$rotation))]
+  
+  pca_matrix <- as.matrix(pca_data)
+  pca_matrix[is.na(pca_matrix)] <- 0
+  pca_matrix_scaled <- scale(pca_matrix)
+  pc1_scores <- as.numeric(pca_matrix_scaled %*% pca_result$rotation[, 1])
+  
+  monthly[, PCI := normalize_01(pc1_scores) * 100]
+  
+  cat("PCA: PC1 objašnjava", round(var_explained[1] * 100, 1), "% varijance\n")
+} else {
+  monthly[, PCI := LVI]
+}
+
+# === INDEKS 12: Composite Labor Index (CLI) ===
+# Kompozitni indeks koji kombinira ključne dimenzije
+core_indices <- c("LVI", "EDI", "WPI", "LSI")
+core_indices <- core_indices[core_indices %in% names(monthly)]
+if (length(core_indices) > 0) {
+  monthly[, CLI := rowMeans(.SD, na.rm = TRUE), .SDcols = core_indices]
+}
+
+# Klizni prosjeci
+index_cols <- c("LVI", "EDI", "WPI", "LMTI", "LSI", "LUI", "LFLI", "SPI", "LRI", "VGI", "PCI", "CLI")
+index_cols <- index_cols[index_cols %in% names(monthly)]
+
+for (idx in index_cols) {
+  monthly[, paste0(idx, "_MA3") := frollmean(get(idx), n = 3, align = "center")]
+}
+
+cat("Konstruirano", length(index_cols), "indeksa\n")
+```
+
+## Opis indeksa
+
+```{r index-descriptions}
+#| label: index-descriptions
+
+index_desc <- data.table(
+  Indeks = c("LVI", "EDI", "WPI", "LMTI", "LSI", "LUI", "LFLI", "SPI", "LRI", "VGI", "PCI", "CLI"),
+  Naziv = c(
+    "Labor Volume Index",
+    "Employment Dynamics Index",
+    "Wage Pressure Index",
+    "Labor Market Tightness Index",
+    "Labor Sentiment Index",
+    "Labor Uncertainty Index",
+    "Labor Forward Looking Index",
+    "Social Protection Index",
+    "Labor Relations Index",
+    "Vulnerable Groups Index",
+    "Principal Component Index",
+    "Composite Labor Index"
+  ),
+  Opis = c(
+    "Ukupan volumen medijske pokrivenosti tržišta rada",
+    "Dinamika zapošljavanja i otpuštanja",
+    "Intenzitet rasprave o plaćama i primanjima",
+    "Napetost na tržištu rada (nedostatak radnika, deficitarna zanimanja)",
+    "Sentiment medijskog diskursa o tržištu rada",
+    "Neizvjesnost na tržištu rada",
+    "Forward looking orijentacija (planovi, prognoze)",
+    "Pokrivenost tema socijalne zaštite i mirovina",
+    "Intenzitet rasprave o radnim odnosima i sindikatima",
+    "Pokrivenost tema ranjivih skupina (mladi, žene, invalidi)",
+    "Prva glavna komponenta svih dimenzija",
+    "Kompozitni indeks ključnih dimenzija"
+  )
+)
+
+index_desc_filtered <- index_desc[Indeks %in% index_cols]
+
+kable(index_desc_filtered, caption = "Pregled konstruiranih labor indeksa") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+# Vizualizacija indeksa
+
+## Glavni labor indeksi
+
+```{r main-indices-plot}
+#| label: main-indices-plot
+#| fig-cap: "Glavni semantički indeksi tržišta rada"
+#| fig-height: 12
+
+p1 <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_line(aes(y = LVI, color = "LVI (Volume)"), linewidth = 1) +
+  geom_line(aes(y = CLI, color = "CLI (Composite)"), linewidth = 1.2) +
+  scale_color_manual(values = c("LVI (Volume)" = pal$cool, "CLI (Composite)" = pal$primary)) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Volume i kompozitni indeks tržišta rada", x = NULL, y = "Indeks (0-100)", color = NULL) +
+  theme(legend.position = "bottom")
+
+p2 <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_line(aes(y = EDI, color = "EDI (Dynamics)"), linewidth = 1) +
+  geom_line(aes(y = WPI, color = "WPI (Wages)"), linewidth = 1) +
+  scale_color_manual(values = c("EDI (Dynamics)" = pal$success, "WPI (Wages)" = pal$warm)) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Dinamika zapošljavanja i plaće", x = NULL, y = "Indeks (0-100)", color = NULL) +
+  theme(legend.position = "bottom")
+
+p3 <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_ribbon(aes(ymin = 50, ymax = LSI), fill = pal$success, alpha = 0.3) +
+  geom_line(aes(y = LSI), color = pal$primary, linewidth = 1) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = pal$muted) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Labor Sentiment Index (LSI)", subtitle = "Iznad 50 = pozitivan sentiment prevladava",
+       x = NULL, y = "Indeks (0-100)")
+
+p4 <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_area(aes(y = LUI), fill = pal$highlight, alpha = 0.5) +
+  geom_line(aes(y = LUI), color = pal$highlight, linewidth = 1) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Labor Uncertainty Index (LUI)", x = NULL, y = "Indeks (0-100)")
+
+(p1 / p2) / (p3 / p4)
+```
+
+## Labor Market Tightness
+
+```{r tightness-plot}
+#| label: tightness-plot
+#| fig-cap: "Labor Market Tightness Index"
+#| fig-height: 6
+
+if ("LMTI" %in% names(monthly)) {
+  ggplot(monthly, aes(x = yearmonth)) +
+    geom_col(aes(y = LMTI), fill = pal$accent, alpha = 0.7) +
+    geom_line(aes(y = LMTI_MA3), color = pal$highlight, linewidth = 1.2, na.rm = TRUE) +
+    scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+    labs(
+      title = "Labor Market Tightness Index (LMTI)",
+      subtitle = "Viši = veća napetost (nedostatak radnika, deficitarna zanimanja)",
+      x = NULL, y = "Indeks (0-100)"
+    )
+}
+```
+
+## Wage vs Employment Dynamics
+
+```{r wage-employment-scatter}
+#| label: wage-employment-scatter
+#| fig-cap: "Wage Pressure vs Employment Dynamics"
+#| fig-height: 6
+
+if (all(c("WPI", "EDI") %in% names(monthly))) {
+  ggplot(monthly, aes(x = EDI, y = WPI)) +
+    geom_point(aes(size = N, color = yearmonth), alpha = 0.7) +
+    geom_smooth(method = "lm", se = TRUE, color = pal$primary) +
+    scale_color_viridis_c(option = "viridis", labels = function(x) format(as.Date(x, origin = "1970-01-01"), "%b %Y")) +
+    labs(
+      title = "Wage Pressure vs Employment Dynamics",
+      x = "Employment Dynamics Index", y = "Wage Pressure Index",
+      size = "Broj članaka", color = "Mjesec"
+    ) +
+    theme(legend.position = "right")
+}
+```
+
+## Social dimensions
+
+```{r social-dimensions}
+#| label: social-dimensions
+#| fig-cap: "Socijalne dimenzije tržišta rada"
+#| fig-height: 8
+
+social_indices <- c("SPI", "LRI", "VGI")
+social_indices <- social_indices[social_indices %in% names(monthly)]
+
+if (length(social_indices) > 0) {
+  social_long <- melt(
+    monthly[, c("yearmonth", social_indices), with = FALSE],
+    id.vars = "yearmonth",
+    variable.name = "indeks",
+    value.name = "vrijednost"
+  )
+  
+  index_labels <- c(
+    "SPI" = "Social Protection",
+    "LRI" = "Labor Relations",
+    "VGI" = "Vulnerable Groups"
+  )
+  social_long[, indeks_label := index_labels[as.character(indeks)]]
+  
+  ggplot(social_long, aes(x = yearmonth, y = vrijednost)) +
+    geom_area(fill = pal$purple, alpha = 0.3) +
+    geom_line(color = pal$primary, linewidth = 1) +
+    geom_smooth(method = "loess", se = FALSE, color = pal$highlight, linewidth = 1, span = 0.3) +
+    facet_wrap(~indeks_label, ncol = 1, scales = "free_y") +
+    scale_x_date(date_breaks = "3 months", date_labels = "%b %y") +
+    labs(
+      title = "Socijalne dimenzije tržišta rada",
+      subtitle = "S LOESS trendom",
+      x = NULL, y = "Indeks (0-100)"
+    ) +
+    theme(strip.text = element_text(face = "bold"))
+}
+```
+
+# Sektorska analiza
+
+## Dinamika po dimenzijama
+
+```{r sector-dynamics}
+#| label: sector-dynamics
+#| fig-cap: "Dinamika dimenzija tržišta rada kroz vrijeme"
+#| fig-height: 16
+
+key_macro <- c("macro_zaposlenost", "macro_place", "macro_dinamika_rada",
+               "macro_radni_odnosi", "macro_uvjeti_rada", "macro_demografija",
+               "macro_obrazovanje", "macro_sektori", "macro_socijalna_zastita",
+               "macro_produktivnost", "macro_ranjive_skupine", "macro_institucije")
+key_macro <- key_macro[key_macro %in% names(monthly)]
+
+sector_long <- melt(
+  monthly[, c("yearmonth", key_macro), with = FALSE],
+  id.vars = "yearmonth",
+  variable.name = "dimenzija",
+  value.name = "vrijednost"
+)
+
+sector_long[, dimenzija := gsub("macro_", "", dimenzija)]
+sector_long[, vrijednost_norm := normalize_01(vrijednost) * 100, by = dimenzija]
+
+ggplot(sector_long, aes(x = yearmonth, y = vrijednost_norm)) +
+  geom_area(fill = pal$accent, alpha = 0.3) +
+  geom_line(color = pal$primary, linewidth = 0.8) +
+  geom_smooth(method = "loess", se = FALSE, color = pal$highlight, linewidth = 1, span = 0.3) +
+  facet_wrap(~dimenzija, ncol = 2, scales = "free_y") +
+  scale_x_date(date_breaks = "6 months", date_labels = "%b %y") +
+  labs(
+    title = "Dinamika semantičkih dimenzija tržišta rada",
+    subtitle = "Normalizirane vrijednosti s LOESS trendom",
+    x = NULL, y = "Indeks (0-100)"
+  ) +
+  theme(
+    strip.text = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+## Heatmapa dimenzija
+
+```{r sector-heatmap}
+#| label: sector-heatmap
+#| fig-cap: "Heatmapa dimenzija tržišta rada"
+#| fig-height: 10
+
+heatmap_data <- sector_long[, .(yearmonth, dimenzija, vrijednost_norm)]
+
+ggplot(heatmap_data, aes(x = yearmonth, y = dimenzija, fill = vrijednost_norm)) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "plasma") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b %y") +
+  labs(
+    title = "Heatmapa dimenzija tržišta rada",
+    x = NULL, y = NULL, fill = "Intenzitet\n(0-100)"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Korelacijska struktura
+
+```{r correlation-matrix}
+#| label: correlation-matrix
+#| fig-cap: "Korelacijska matrica dimenzija i indeksa"
+#| fig-height: 12
+
+cor_vars <- c(macro_cols, index_cols)
+cor_vars <- cor_vars[cor_vars %in% names(monthly)]
+
+cor_data <- monthly[, .SD, .SDcols = cor_vars]
+cor_matrix <- cor(cor_data, use = "pairwise.complete.obs")
+
+rownames(cor_matrix) <- gsub("macro_", "", rownames(cor_matrix))
+colnames(cor_matrix) <- gsub("macro_", "", colnames(cor_matrix))
+
+corrplot(cor_matrix,
+         method = "color",
+         type = "upper",
+         order = "hclust",
+         tl.col = "black",
+         tl.srt = 45,
+         tl.cex = 0.6,
+         addCoef.col = "black",
+         number.cex = 0.4,
+         col = colorRampPalette(c(pal$cool, "white", pal$highlight))(100),
+         title = "Korelacijska matrica",
+         mar = c(0, 0, 2, 0))
+```
+
+# Sentiment analiza
+
+## Sentiment komponente
+
+```{r sentiment-components}
+#| label: sentiment-components
+#| fig-cap: "Labor sentiment komponente kroz vrijeme"
+#| fig-height: 12
+
+p_sent1 <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_col(aes(y = sent_positive_avg), fill = pal$success, alpha = 0.7) +
+  geom_col(aes(y = -sent_negative_avg), fill = pal$highlight, alpha = 0.7) +
+  geom_hline(yintercept = 0, color = "black") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Pozitivni (gore) vs Negativni (dolje) sentiment po članku",
+       x = NULL, y = "Prosječan broj pojmova")
+
+p_sent2 <- ggplot(monthly, aes(x = yearmonth, y = sent_ratio_avg)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = pal$muted) +
+  geom_area(aes(fill = sent_ratio_avg > 0), alpha = 0.5) +
+  geom_line(color = pal$primary, linewidth = 1) +
+  scale_fill_manual(values = c("TRUE" = pal$success, "FALSE" = pal$highlight), guide = "none") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Net sentiment ratio", subtitle = "(pozitivno - negativno) / (pozitivno + negativno)",
+       x = NULL, y = "Ratio (-1 do 1)")
+
+p_sent3 <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_line(aes(y = intensity_high / N * 100, color = "Visoki intenzitet"), linewidth = 1) +
+  geom_line(aes(y = intensity_low / N * 100, color = "Niski intenzitet"), linewidth = 1) +
+  scale_color_manual(values = c("Visoki intenzitet" = pal$highlight, "Niski intenzitet" = pal$cool)) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Intenzitet jezika", x = NULL, y = "Pojmova na 100 članaka", color = NULL) +
+  theme(legend.position = "bottom")
+
+p_sent1 / p_sent2 / p_sent3
+```
+
+## Uncertainty vs Sentiment
+
+```{r uncertainty-sentiment-scatter}
+#| label: uncertainty-sentiment-scatter
+#| fig-cap: "Odnos neizvjesnosti i sentimenta na tržištu rada"
+#| fig-height: 6
+
+ggplot(monthly, aes(x = LUI, y = LSI)) +
+  geom_point(aes(size = N, color = yearmonth), alpha = 0.7) +
+  geom_smooth(method = "lm", se = TRUE, color = pal$primary) +
+  scale_color_viridis_c(option = "viridis", labels = function(x) format(as.Date(x, origin = "1970-01-01"), "%b %Y")) +
+  labs(
+    title = "Labor Uncertainty vs Labor Sentiment",
+    x = "Labor Uncertainty Index", y = "Labor Sentiment Index",
+    size = "Broj članaka", color = "Mjesec"
+  ) +
+  theme(legend.position = "right")
+```
+
+# Volatilnost i momentum
+
+```{r volatility-momentum}
+#| label: volatility-momentum
+#| fig-cap: "Volatilnost i momentum labor indeksa"
+#| fig-height: 14
+
+# Volatilnost
+monthly[, LVI_vol := frollapply(LVI, n = 3, FUN = sd, align = "right")]
+monthly[, CLI_vol := frollapply(CLI, n = 3, FUN = sd, align = "right")]
+monthly[, WPI_vol := frollapply(WPI, n = 3, FUN = sd, align = "right")]
+
+# Momentum
+monthly[, LVI_mom := LVI - shift(LVI, 1)]
+monthly[, CLI_mom := CLI - shift(CLI, 1)]
+monthly[, LVI_mom3 := LVI - shift(LVI, 3)]
+
+p_vol <- ggplot(monthly[!is.na(LVI_vol)], aes(x = yearmonth)) +
+  geom_line(aes(y = LVI_vol, color = "LVI"), linewidth = 1) +
+  geom_line(aes(y = WPI_vol, color = "WPI"), linewidth = 1) +
+  scale_color_manual(values = c("LVI" = pal$cool, "WPI" = pal$warm)) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Volatilnost indeksa (3M rolling SD)", x = NULL, y = "Standardna devijacija", color = NULL) +
+  theme(legend.position = "bottom")
+
+p_mom <- ggplot(monthly[!is.na(LVI_mom)], aes(x = yearmonth)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = pal$muted) +
+  geom_col(aes(y = LVI_mom, fill = LVI_mom > 0), alpha = 0.7) +
+  scale_fill_manual(values = c("TRUE" = pal$success, "FALSE" = pal$highlight), guide = "none") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "LVI momentum (M/M promjena)", x = NULL, y = "Promjena")
+
+p_mom3 <- ggplot(monthly[!is.na(LVI_mom3)], aes(x = yearmonth)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = pal$muted) +
+  geom_area(aes(y = LVI_mom3, fill = LVI_mom3 > 0), alpha = 0.5) +
+  geom_line(aes(y = LVI_mom3), color = pal$primary, linewidth = 1) +
+  scale_fill_manual(values = c("TRUE" = pal$success, "FALSE" = pal$highlight), guide = "none") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "LVI 3 mjesečni momentum", x = NULL, y = "Promjena")
+
+p_combined <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_line(aes(y = scale(LVI)[,1], color = "LVI (std)"), linewidth = 1) +
+  geom_line(aes(y = scale(LUI)[,1], color = "LUI (std)"), linewidth = 1) +
+  geom_line(aes(y = scale(WPI)[,1], color = "WPI (std)"), linewidth = 1) +
+  scale_color_manual(values = c("LVI (std)" = pal$cool, "LUI (std)" = pal$highlight, "WPI (std)" = pal$warm)) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Standardizirani indeksi", x = NULL, y = "Z-score", color = NULL) +
+  theme(legend.position = "bottom")
+
+p_vol / p_mom / p_mom3 / p_combined
+```
+
+# Topic concentration
+
+```{r topic-concentration}
+#| label: topic-concentration
+#| fig-cap: "Koncentracija tema tržišta rada"
+#| fig-height: 8
+
+calc_hhi <- function(values) {
+  values <- values[values > 0]
+  if (length(values) == 0) return(0)
+  shares <- values / sum(values)
+  sum(shares^2)
+}
+
+monthly[, topic_hhi := apply(.SD, 1, calc_hhi), .SDcols = macro_cols]
+monthly[, topic_count := rowSums(.SD > 0), .SDcols = macro_cols]
+
+p_hhi <- ggplot(monthly, aes(x = yearmonth, y = topic_hhi)) +
+  geom_line(color = pal$primary, linewidth = 1) +
+  geom_smooth(method = "loess", se = TRUE, color = pal$highlight, span = 0.3) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(
+    title = "Herfindahl indeks koncentracije tema",
+    subtitle = "Viši = fokusiranije na manje tema | Niži = disperziranije",
+    x = NULL, y = "HHI"
+  )
+
+p_count <- ggplot(monthly, aes(x = yearmonth, y = topic_count)) +
+  geom_col(fill = pal$accent, alpha = 0.7) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Broj aktivnih dimenzija po mjesecu", x = NULL, y = "Broj dimenzija s pojavljivanjem")
+
+p_hhi / p_count
+```
+
+# Korelacije između indeksa
+
+```{r index-correlations}
+#| label: index-correlations
+
+index_cor <- cor(monthly[, .SD, .SDcols = index_cols], use = "pairwise.complete.obs")
+
+kable(round(index_cor, 3), caption = "Korelacijska matrica labor indeksa") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+# Export
+
+```{r export-excel}
+#| label: export-excel
+
+wb <- createWorkbook()
+
+# Sheet 1: Glavni indeksi
+addWorksheet(wb, "Labor_Indeksi")
+export_indices <- monthly[, c("yearmonth", "N", index_cols, paste0(index_cols[1:min(5, length(index_cols))], "_MA3")), with = FALSE]
+names(export_indices)[1:2] <- c("Datum", "Broj_clanaka")
+writeData(wb, "Labor_Indeksi", export_indices)
+
+# Sheet 2: Dimenzije
+addWorksheet(wb, "Dimenzije")
+export_sectors <- monthly[, c("yearmonth", macro_cols), with = FALSE]
+names(export_sectors) <- c("Datum", gsub("macro_", "", macro_cols))
+writeData(wb, "Dimenzije", export_sectors)
+
+# Sheet 3: Sentiment
+addWorksheet(wb, "Sentiment")
+export_sentiment <- monthly[, .(
+  Datum = yearmonth,
+  Pozitivan = sent_positive,
+  Negativan = sent_negative,
+  Net = sent_net,
+  Ratio = sent_ratio_avg,
+  Neizvjesnost = uncertainty,
+  Forward_looking = forward_looking,
+  Intenzitet_visoki = intensity_high,
+  Intenzitet_niski = intensity_low
+)]
+writeData(wb, "Sentiment", export_sentiment)
+
+# Sheet 4: Volatilnost
+addWorksheet(wb, "Volatilnost")
+export_vol <- monthly[, .(
+  Datum = yearmonth,
+  LVI_volatilnost = LVI_vol,
+  LVI_momentum = LVI_mom,
+  LVI_momentum_3M = LVI_mom3,
+  Topic_HHI = topic_hhi
+)]
+writeData(wb, "Volatilnost", export_vol)
+
+# Stilovi
+header_style <- createStyle(
+  textDecoration = "bold",
+  fgFill = "#1a1a2e",
+  fontColour = "white",
+  halign = "center"
+)
+
+for (sheet in names(wb)) {
+  ncols <- switch(sheet,
+    "Labor_Indeksi" = ncol(export_indices),
+    "Dimenzije" = ncol(export_sectors),
+    "Sentiment" = ncol(export_sentiment),
+    "Volatilnost" = ncol(export_vol)
+  )
+  addStyle(wb, sheet, header_style, rows = 1, cols = 1:ncols, gridExpand = TRUE)
+  setColWidths(wb, sheet, cols = 1:ncols, widths = "auto")
+}
+
+output_path <- here("output", "semantic_labor_indices.xlsx")
+dir.create(here("output"), showWarnings = FALSE, recursive = TRUE)
+saveWorkbook(wb, output_path, overwrite = TRUE)
+cat("Excel exportiran:", output_path, "\n")
+```
+
+# Sažetak
+
+```{r summary}
+#| label: summary
+
+summary_table <- data.table(
+  Metrika = c(
+    "Broj analiziranih članaka",
+    "Vremenski raspon",
+    "Broj semantičkih kategorija",
+    "Broj makro dimenzija",
+    "Broj konstruiranih indeksa",
+    "Prosječni LVI",
+    "Prosječni sentiment ratio",
+    "Prosječni LUI"
+  ),
+  Vrijednost = c(
+    format(nrow(dt), big.mark = ","),
+    paste(format(date_min, "%m/%Y"), "-", format(date_max, "%m/%Y")),
+    length(sem_cols),
+    length(macro_cols),
+    length(index_cols),
+    round(mean(monthly$LVI, na.rm = TRUE), 1),
+    round(mean(monthly$sent_ratio_avg, na.rm = TRUE), 3),
+    round(mean(monthly$LUI, na.rm = TRUE), 1)
+  )
+)
+
+kable(summary_table, caption = "Sažetak analize tržišta rada") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+*Izvještaj generiran: `r Sys.time()`*
+
+*GIMES Research | Semantički indeks tržišta rada v1.0*

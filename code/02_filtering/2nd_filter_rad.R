@@ -13,8 +13,8 @@ message("Using ", getDTthreads(), " threads")
 # LOAD DATA
 # ------------------------------------------------------------------------------
 
-message("\n=== LOADING DATA ===")
-labor_articles <- readRDS("C:/Users/lsikic/Desktop/labor_articles.rds")
+# message("\n=== LOADING DATA ===")
+# labor_articles <- readRDS("C:/Users/lsikic/Desktop/labor_articles.rds")
 
 if(!is.data.table(labor_articles)) {
   setDT(labor_articles)

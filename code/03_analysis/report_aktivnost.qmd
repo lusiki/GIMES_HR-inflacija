@@ -424,7 +424,8 @@ tax_summary <- rbindlist(lapply(names(activity_taxonomy), function(macro) {
 }))
 
 kable(tax_summary, caption = "Struktura semantičke taksonomije") %>%
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
+  collapse_rows(columns = 1, valign = "top")
 ```
 
 ## Sentiment i neizvjesnost leksikoni

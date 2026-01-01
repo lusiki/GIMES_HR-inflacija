@@ -1,6 +1,6 @@
 ---
-title: "Semantički indeksi gospodarske aktivnosti"
-subtitle: "Mjerenje ekonomske aktivnosti kroz analizu medijskog diskursa"
+title: "Semantički indeks geopolitičke nestabilnosti"
+subtitle: "Mjerenje geopolitičkih rizika kroz analizu medijskog diskursa"
 author: "GIMES Research"
 date: today
 format:
@@ -53,18 +53,67 @@ pal <- list(
   muted = "#7f8c8d",
   light = "#ecf0f1",
   purple = "#9b59b6",
-  teal = "#1abc9c"
+  teal = "#1abc9c",
+  danger = "#c0392b"
 )
 ```
 
 # Uvod
 
-Ovaj dokument konstruira semantičke indekse gospodarske aktivnosti temeljene na analizi medijskog diskursa. 
+Ovaj dokument konstruira semantičke indekse geopolitičke nestabilnosti temeljene na analizi medijskog diskursa. Metodologija prati strukturu semantičkog indeksiranja prilagođenu geopolitičkoj domeni te mjeri intenzitet aktivnosti, sentiment eskalacije i razinu neizvjesnosti povezanu s međunarodnim odnosima i sukobima.
+
+## Konfiguracija domene
+
+```{r domain-config}
+#| label: domain-config
+
+domain_config <- list(
+  domain = "geopolitical",
+  language = "hr",
+  aggregation = "monthly",
+  indices = c("GRI", "CII", "ESI", "GUI", "FGI", "RTI_E", "METI", "WAI", "MAI", "PCI"),
+  sectors = c("sukobi_ratovi", "rusija_ukrajina", "izrael_bliski_istok", 
+              "nato_zapad", "kina_azija", "balkan", "vojska_oruzje",
+              "diplomacija", "terorizam_sigurnost", "humanitarno",
+              "energetika_resursi", "informacijsko_ratovanje"),
+  normalize_range = c(0, 100)
+)
+
+config_table <- data.table(
+  Parametar = c("Domena", "Jezik", "Agregacija", "Broj indeksa", "Broj sektora", "Raspon normalizacije"),
+  Vrijednost = c(domain_config$domain, domain_config$language, domain_config$aggregation,
+                 length(domain_config$indices), length(domain_config$sectors),
+                 paste(domain_config$normalize_range, collapse = " do "))
+)
+
+kable(config_table, caption = "Konfiguracija analize") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+::: {.callout-note collapse="true"}
+## Metodološki okvir
+
+Indeksi geopolitičke nestabilnosti konstruiraju se primjenom leksičkog pristupa na korpus medijskih tekstova. Svaki indeks slijedi standardnu formulu prilagođenu specifičnostima geopolitičke domene.
+
+**Indeks aktivnosti (xAI)**
+$$xAI_t = normalize_{01}\left(\frac{\sum_{i \in M_t} terms_i}{N_t}\right) \times 100$$
+
+**Indeks sentimenta (xSI)**
+$$xSI_t = normalize_{01}\left(\frac{terms_t}{N_t} \times (1 + SR_t)\right) \times 100$$
+
+Gdje je $SR = \frac{deeskalacija - eskalacija}{deeskalacija + eskalacija}$
+
+**Indeks neizvjesnosti (xUI)**
+$$xUI_t = normalize_{01}\left(\frac{uncertainty\_terms_t}{N_t}\right) \times 100$$
+
+**Indeks budućih očekivanja (xFI)**
+$$xFI_t = normalize_{01}\left(\frac{forward\_terms_t}{N_t}\right) \times 100$$
+:::
 
 ```{r load-data}
 #| label: load-data
 
-dt <- as.data.table(read.xlsx(here("data", "activity_filtered.xlsx")))
+dt <- as.data.table(read.xlsx("C:/Users/lsikic/Desktop/geopolitical_filtered.xlsx"))
 
 if (is.numeric(dt$DATE)) {
   dt[, DATE := as.Date(DATE, origin = "1899-12-30")]
@@ -86,9 +135,6 @@ dt[, `:=`(
 
 date_min <- min(dt$date, na.rm = TRUE)
 date_max <- max(dt$date, na.rm = TRUE)
-
-cat("Učitano", nrow(dt), "članaka\n")
-cat("Vremenski raspon:", as.character(date_min), "do", as.character(date_max), "\n")
 ```
 
 # Eksploratorni pregled
@@ -97,7 +143,6 @@ cat("Vremenski raspon:", as.character(date_min), "do", as.character(date_max), "
 #| label: basic-stats
 
 stats_summary <- data.table(
-
   Metrika = c(
     "Ukupan broj članaka",
     "Vremenski raspon",
@@ -148,8 +193,8 @@ ggplot(monthly_count, aes(x = yearmonth)) +
   geom_line(aes(y = MA3), color = pal$highlight, linewidth = 1.2, na.rm = TRUE) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
   labs(
-    title = "Mjesečni broj članaka o gospodarskoj aktivnosti",
-    subtitle = "Crvena linija = 3 mjesečni klizni prosjek",
+    title = "Mjesečni broj članaka o geopolitičkim temama",
+    subtitle = "Crvena linija predstavlja tromjesečni klizni prosjek",
     x = NULL, y = "Broj članaka"
   ) +
   theme(plot.title = element_text(face = "bold"))
@@ -157,244 +202,372 @@ ggplot(monthly_count, aes(x = yearmonth)) +
 
 # Semantička taksonomija
 
-## Hijerarhijska struktura pojmova
+Taksonomija geopolitičkog diskursa organizirana je hijerarhijski u makro i mezo kategorije. Svaka kategorija definirana je skupom regularnih izraza koji obuhvaćaju morfološke varijante pojmova karakterističnih za hrvatski jezik.
+
+::: {.callout-note collapse="true"}
+## Prikaz kompletne taksonomije
 
 ```{r semantic-taxonomy}
 #| label: semantic-taxonomy
 
-activity_taxonomy <- list(
+geopolitical_taxonomy <- list(
   
-  # === 1. BDP I AGREGATNA AKTIVNOST ===
-  bdp_agregat = list(
-    bdp_direktno = c(
-      "\\bBDP[aeu]?\\b", "bruto doma[cć][ie]g? proizvod[aeu]?",
-      "gross domestic product", "\\bGDP\\b"
+  sukobi_ratovi = list(
+    rat_opce = c(
+      "\\brat[aou]?\\b", "\\bratov[aeiou]+\\b", "ratovanj[aeu]?",
+      "\\bwar\\b", "warfare", "oružan[aeiou]+.{0,10}sukob",
+      "vojn[aeiou]+.{0,10}sukob", "neprijateljstv[aeiou]?"
     ),
-    bdp_dinamika = c(
-      "rast.{0,10}BDP", "pad.{0,10}BDP", "BDP.{0,10}rast", "BDP.{0,10}pad",
-      "rast.{0,10}gospodar", "pad.{0,10}gospodar",
-      "ekonomsk[aeiou]+ rast", "gospodars[aeikou]+ rast",
-      "negativan.{0,5}rast", "pozitivan.{0,5}rast"
+    invazija_okupacija = c(
+      "invazij[aeiou]?", "okupacij[aeiou]?", "agresij[aeiou]?",
+      "napad.{0,10}na.{0,10}(zemlju|državu|teritorij)",
+      "vojn[aeiou]+.{0,10}intervencij[aeiou]?"
     ),
-    recesija_ekspanzija = c(
-      "recesij[aeiou]?", "stagnacij[aeiou]?", "kontrakcij[aeiou]?",
-      "ekspanzij[aeiou]?", "oporavak.{0,10}gospodar", "gospodar.{0,10}oporavak",
-      "usporavanj[aeu]?.{0,10}gospodar", "ubrzanj[aeu]?.{0,10}gospodar"
+    bojiste = c(
+      "boji[sš]t[aeu]?", "front[aeu]?", "linij[aeiou]+.{0,10}front",
+      "borbena?.{0,10}linij[aeiou]?", "rov[aeiou]?"
     ),
-    kvartalni = c(
-      "kvartaln[aeiou]+.{0,10}(rast|pad|BDP|podaci)",
-      "prvi.{0,5}kvartal", "drugi.{0,5}kvartal",
-      "tre[cć]i.{0,5}kvartal", "[cč]etvrti.{0,5}kvartal",
-      "Q[1-4]", "sezonski.{0,10}prilag"
+    ofenziva_defenziva = c(
+      "ofenziv[aeiou]?", "defenziv[aeiou]?", "protuofenziv[aeiou]?",
+      "napad[aeiou]?", "obran[aeiou]?", "povla[cč]enj[aeu]?"
+    ),
+    zrtve = c(
+      "[zž]rtv[aeiou]?", "poginut[aeiou]?", "poginul[aeiou]+",
+      "ubijen[aeiou]?", "ranjen[aeiou]?", "civiln[aeiou]+.{0,10}žrtv",
+      "masak[a]?r", "genocid", "zlo[cč]in.{0,10}(protiv.{0,10})?[cč]ovje[cč]nost"
     )
   ),
   
-  # === 2. INDUSTRIJSKA PROIZVODNJA ===
-  industrija = list(
-    proizvodnja_opce = c(
-      "industrijska?.{0,10}proizvodnj[aeiou]?",
-      "proizvodni?.{0,10}sektor", "proizvodni?.{0,10}aktivnost",
-      "tvornic[aeiou]?", "pogon[aeiou]?"
+  rusija_ukrajina = list(
+    rusija = c(
+      "\\bRusij[aeiou]?\\b", "rusk[aeiou]+", "\\bMoskv[aeiou]?\\b",
+      "\\bKremlj[aeiou]?\\b", "\\bPutin[aeiou]?\\b",
+      "Ruska?.{0,5}Federacij[aeiou]?"
     ),
-    preradivacka = c(
-      "prera[dđ]iva[cč]k[aeiou]+.{0,10}industrij[aeiou]?",
-      "prera[dđ]iva[cč]k[aeiou]+.{0,10}sektor",
-      "manufacturin[g]?"
+    ukrajina = c(
+      "\\bUkrajin[aeiou]?\\b", "ukrajinsk[aeiou]+",
+      "\\bKijev[aeiou]?\\b", "\\bKyiv\\b",
+      "\\bZelenski[aeiou]?\\b", "\\bZelensky\\b", "\\bZalu[zž]n[aeiou]+\\b"
     ),
-    energetika = c(
-      "energetsk[aeiou]+.{0,10}sektor", "energetik[aeiou]?",
-      "proizvodnj[aeiou]?.{0,10}energij", "elektran[aeiou]?",
-      "\\bHEP\\b", "\\bINA\\b"
+    ruski_rat = c(
+      "rusk[aeiou]+.{0,10}(invazij|agresij|napad|rat)",
+      "(invazij|agresij|napad|rat).{0,10}(na.{0,5})?Ukrajin",
+      "rusko.{0,5}ukrajinsk[aeiou]+.{0,10}(rat|sukob)",
+      "specijalna.{0,10}vojn[aeiou]+.{0,10}operacij[aeiou]?"
     ),
-    kapaciteti = c(
-      "iskori[sš]tenost.{0,10}kapacitet",
-      "proizvodni.{0,10}kapacitet",
-      "industrijsk[aeiou]+.{0,10}kapacitet"
+    regije_ukrajina = c(
+      "\\bDonbas[aeiou]?\\b", "\\bDoneck\\b", "\\bLuhansk\\b", "\\bLugansk\\b",
+      "\\bKrim[aeiou]?\\b", "\\bCrime[aeiou]?\\b", "\\bHerson[aeiou]?\\b",
+      "\\bZaporož[aeiou]+\\b", "\\bHarkiv[aeiou]?\\b", "\\bMariupolj[aeiou]?\\b",
+      "\\bBahmut[aeiou]?\\b", "\\bAvdiivk[aeiou]?\\b"
+    ),
+    wagner = c(
+      "\\bWagner[aeiou]?\\b", "Prigožin[aeiou]?", "Prigozhin",
+      "pla[cć]eni[cč]k[aeiou]+.{0,10}(skupin|grupa)"
     )
   ),
   
-  # === 3. GRAĐEVINARSTVO ===
-  gradevinarstvo = list(
-    sektor = c(
-      "gra[dđ]evinarstv[aou]?", "gra[dđ]evins[aeikou]+.{0,10}sektor",
-      "gra[dđ]evins[aeikou]+.{0,10}aktivnost",
-      "gra[dđ]evins[aeikou]+.{0,10}radov[aeiou]?"
+  izrael_bliski_istok = list(
+    izrael = c(
+      "\\bIzrael[aeiou]?\\b", "izraelsk[aeiou]+",
+      "\\bTel.?Aviv[aeiou]?\\b", "\\bJeruzalem[aeiou]?\\b",
+      "\\bNetanyahu[aeiou]?\\b", "\\bIDF\\b",
+      "izraelske?.{0,5}obrambene?.{0,5}snage"
     ),
-    projekti = c(
-      "gradnj[aeiou]?", "izgradnj[aeiou]?",
-      "infrastruktur[aeiou]?", "projekat", "projekt[aeiou]?"
+    palestina = c(
+      "\\bPalestin[aeiou]+\\b", "palestinsk[aeiou]+",
+      "\\bGaz[aeiou]?\\b", "pojas[aeiou]?.{0,5}Gaz[aeiou]?",
+      "Zapadn[aeiou]+.{0,5}obal[aeiou]?", "\\bWest.?Bank\\b"
     ),
-    nekretnine = c(
-      "nekretnin[aeiou]?", "stanov[aeiou]?", "stambeni?.{0,10}gradnj",
-      "tr[zž]i[sš]t[aeu]?.{0,10}nekretnin"
+    hamas = c(
+      "\\bHamas[aeiou]?\\b", "hamasov[aeiou]+",
+      "Al.?Kasam", "Al.?Qassam", "Brigad[aeiou]+.{0,10}Kasam",
+      "Hanij[aeiou]?", "Haniyeh", "7\\.?.{0,5}listopad[aeiou]?"
     ),
-    dozvole = c(
-      "gra[dđ]evins[aeikou]+.{0,10}dozvol[aeiou]?",
-      "izdane.{0,10}dozvol", "broj.{0,10}dozvol"
+    hezbollah = c(
+      "\\bHezbola[h]?[aeiou]?\\b", "hezbolahov[aeiou]+",
+      "\\bNasrala[h]?[aeiou]?\\b", "\\bNasrallah\\b",
+      "libanonsk[aeiou]+.{0,10}milicij[aeiou]?"
+    ),
+    libanon = c(
+      "\\bLibanon[aeiou]?\\b", "libanonsk[aeiou]+",
+      "\\bBejrut[aeiou]?\\b", "\\bBeirut\\b", "\\bDahiye[h]?\\b"
+    ),
+    iran = c(
+      "\\bIran[aeiou]?\\b", "iransk[aeiou]+",
+      "\\bTeheran[aeiou]?\\b", "ajatolah", "ayatollah",
+      "Iranska?.{0,5}revolucionarna.{0,5}garda"
+    ),
+    sirija = c(
+      "\\bSirij[aeiou]?\\b", "sirijsk[aeiou]+",
+      "\\bDamask[aeiou]?\\b", "\\bAsad[aeiou]?\\b", "\\bAssad\\b"
+    ),
+    arapske_zemlje = c(
+      "Saudijsk[aeiou]+.{0,10}Arabij[aeiou]?", "\\bUAE\\b",
+      "Ujedinjeni.{0,5}Arapski.{0,5}Emirati", "\\bKatar[aeiou]?\\b",
+      "\\bEgipt[aeiou]?\\b", "\\bJordan[aeiou]?\\b"
     )
   ),
   
-  # === 4. TURIZAM ===
-  turizam = list(
-    promet = c(
-      "turisti[cč]k[aeiou]+.{0,10}promet",
-      "turisti[cč]k[aeiou]+.{0,10}prihod[aeiou]?",
-      "turisti[cč]k[aeiou]+.{0,10}sezon[aeiou]?"
+  nato_zapad = list(
+    nato = c(
+      "\\bNATO[aeiou]?\\b", "Sjevernoatlantsk[aeiou]+.{0,10}(savez|pakt)",
+      "Atlantsk[aeiou]+.{0,10}savez", "[cč]lanic[aeiou]+.{0,10}NATO"
     ),
-    dolasci_nocenja = c(
-      "dolaz[aeikou]+.{0,10}turist", "turist.{0,10}dolaz",
-      "no[cć]enj[aeiou]?", "broj.{0,10}turist[aeiou]?"
+    eu = c(
+      "\\bEU\\b", "Europsk[aeiou]+.{0,10}unij[aeiou]?",
+      "\\bBruxelles\\b", "\\bBrisel[aeiou]?\\b",
+      "europsk[aeiou]+.{0,10}(institucij|komisij|parlamen|vije[cć])"
     ),
-    smjestaj = c(
-      "smje[sš]tajn[aeiou]+.{0,10}kapacitet",
-      "hotel[aeiou]?", "kampov[aeiou]?",
-      "popunjenost.{0,10}smje[sš]taj"
+    sad = c(
+      "\\bSAD\\b", "Sjedinjene?.{0,5}Ameri[cč]ke?.{0,5}Države",
+      "\\bWashington[aeiou]?\\b", "Bijela?.{0,5}ku[cć][aeiou]?",
+      "\\bBiden[aeiou]?\\b", "\\bTrump[aeiou]?\\b",
+      "ameri[cč]k[aeiou]+.{0,10}(administracij|vlad|politk)"
+    ),
+    britanija = c(
+      "\\bBritanij[aeiou]?\\b", "britansk[aeiou]+",
+      "Ujedinjeno.{0,5}Kraljevstvo", "\\bUK\\b",
+      "\\bLondon[aeiou]?\\b"
+    ),
+    njemacka = c(
+      "\\bNjema[cč]k[aeiou]?\\b", "njema[cč]k[aeiou]+",
+      "\\bBerlin[aeiou]?\\b", "\\bScholz[aeiou]?\\b",
+      "\\bBundestag[aeiou]?\\b"
+    ),
+    francuska = c(
+      "\\bFrancusk[aeiou]?\\b", "francusk[aeiou]+",
+      "\\bPariz[aeiou]?\\b", "\\bMacron[aeiou]?\\b",
+      "\\bElysee\\b"
     )
   ),
   
-  # === 5. TRGOVINA ===
-  trgovina = list(
-    vanjska = c(
-      "vanjsk[aeiou]+.{0,10}trgovin[aeiou]?",
-      "trgovinsk[aeiou]+.{0,10}bilanc[aeiou]?",
-      "robn[aeiou]+.{0,10}razmjen[aeiou]?"
+  kina_azija = list(
+    kina = c(
+      "\\bKin[aeiou]?\\b", "kinesk[aeiou]+", "\\bNR.?Kin[aeiou]?\\b",
+      "\\bPeking[aeiou]?\\b", "\\bBeijing\\b",
+      "\\bXi.?Jinping[aeiou]?\\b", "Komunisti[cč]k[aeiou]+.{0,10}partij[aeiou]?",
+      "\\bKPK\\b", "\\bCCP\\b"
     ),
-    izvoz = c(
-      "izvoz[aeiou]?", "eksport[aeiou]?",
-      "rast.{0,10}izvoz", "pad.{0,10}izvoz",
-      "izvozn[aeikou]+.{0,10}aktivnost"
+    tajvan = c(
+      "\\bTajvan[aeiou]?\\b", "tajvansk[aeiou]+",
+      "\\bTaipei\\b", "Tjesnac[aeiou]?.{0,10}Tajvan",
+      "kinesko.{0,10}ujedinjenje"
     ),
-    uvoz = c(
-      "uvoz[aeiou]?", "import[aeiou]?",
-      "rast.{0,10}uvoz", "pad.{0,10}uvoz"
+    juzno_kinesko_more = c(
+      "Ju[zž]no.{0,5}kinesko.{0,5}more",
+      "Isto[cč]no.{0,5}kinesko.{0,5}more",
+      "\\bSpratly\\b", "\\bParacel\\b",
+      "filipinsk[aeiou]+.{0,10}(more|vod[aeiou])"
     ),
-    maloprodaja = c(
-      "maloprodaj[aeiou]?", "maloprodajn[aeiou]+.{0,10}promet",
-      "promet.{0,10}trgovin", "trgovin[aeiou]+.{0,10}promet"
+    sjeverna_koreja = c(
+      "Sjevern[aeiou]+.{0,5}Korej[aeiou]?", "sjevernokorejsk[aeiou]+",
+      "\\bPjongjang[aeiou]?\\b", "\\bPyongyang\\b",
+      "\\bKim.?Jong.?Un[aeiou]?\\b", "\\bDPRK\\b"
+    ),
+    japan_juzna_koreja = c(
+      "\\bJapan[aeiou]?\\b", "japansk[aeiou]+", "\\bTokio\\b", "\\bTokyo\\b",
+      "Ju[zž]n[aeiou]+.{0,5}Korej[aeiou]?", "ju[zž]nokorejsk[aeiou]+", "\\bSeul[aeiou]?\\b"
+    ),
+    indo_pacifik = c(
+      "Indo.?Pacifik", "\\bAUKUS\\b", "\\bQUAD\\b",
+      "azijsko.{0,10}pacifi[cč]k[aeiou]+"
     )
   ),
   
-  # === 6. INVESTICIJE ===
-  investicije = list(
-    opce = c(
-      "investicij[aeiou]?", "ulaganj[aeiou]?",
-      "kapitalna?.{0,10}ulaganj", "bruto.{0,10}investicij"
+  balkan = list(
+    srbija = c(
+      "\\bSrbij[aeiou]?\\b", "srpsk[aeiou]+",
+      "\\bBeograd[aeiou]?\\b", "\\bVu[cč]i[cć][aeiou]?\\b"
     ),
-    strane = c(
-      "stran[aeiou]+.{0,10}investicij", "stran[aeiou]+.{0,10}ulaganj",
-      "\\bFDI\\b", "inozemn[aeiou]+.{0,10}ulaganj",
-      "privla[cč]enj[aeu]?.{0,10}investicij"
+    kosovo = c(
+      "\\bKosov[aou]?\\b", "kosovsk[aeiou]+",
+      "\\bPri[sš]tin[aeiou]?\\b", "\\bKurti[aeiou]?\\b",
+      "srpsko.{0,10}kosovsk[aeiou]+"
     ),
-    javne = c(
-      "javn[aeiou]+.{0,10}investicij", "dr[zž]avn[aeiou]+.{0,10}ulaganj",
-      "eu.{0,5}fondov[aeiou]?", "europsk[aeiou]+.{0,10}fondov"
+    bih = c(
+      "Bosn[aeiou]+.{0,10}Hercegovin[aeiou]?", "\\bBiH\\b",
+      "bosansko?herceogva[cč]k[aeiou]+", "\\bSarajev[aou]?\\b",
+      "\\bDodik[aeiou]?\\b", "Republika?.{0,5}Srpsk[aeiou]?"
+    ),
+    crna_gora = c(
+      "Crn[aeiou]+.{0,5}Gor[aeiou]?", "crnogorsk[aeiou]+",
+      "\\bPodgoric[aeiou]?\\b"
+    ),
+    madarska = c(
+      "\\bMa[dđ]arsk[aeiou]?\\b", "ma[dđ]arsk[aeiou]+",
+      "\\bBudimpe[sš]t[aeiou]?\\b", "\\bOrban[aeiou]?\\b"
+    ),
+    turska = c(
+      "\\bTursk[aeiou]?\\b", "tursk[aeiou]+",
+      "\\bAnkar[aeiou]?\\b", "\\bErdogan[aeiou]?\\b",
+      "\\bBospor[aeiou]?\\b", "\\bDardanel[aeiou]+\\b"
     )
   ),
   
-  # === 7. TRŽIŠTE RADA ===
-  trziste_rada = list(
-    zaposlenost = c(
-      "zaposlenost[aeiou]?", "zaposlen[aeiou]+",
-      "broj.{0,10}zaposlen", "rast.{0,10}zaposlen",
-      "nova?.{0,10}radna?.{0,10}mjesta?"
+  vojska_oruzje = list(
+    vojska_opce = c(
+      "vojsk[aeiou]?", "vojn[aeiou]+.{0,10}snag[aeiou]?",
+      "oru[zž]ane?.{0,10}snag[aeiou]?", "militar[aeiou]+",
+      "borbene?.{0,10}snag[aeiou]?"
     ),
-    nezaposlenost = c(
-      "nezaposlenost[aeiou]?", "nezaposlen[aeiou]+",
-      "stopa?.{0,10}nezaposlen", "\\bHZZ\\b",
-      "evidencij[aeiou]+.{0,10}nezaposlen"
+    kopnene_snage = c(
+      "kopnen[aeiou]+.{0,10}snag[aeiou]?", "pje[sš]a[sš]tv[aou]?",
+      "oklopn[aeiou]+.{0,10}(snage|vozil|brigad)",
+      "\\btenk[aeiou]+\\b", "artiljerij[aeiou]?"
     ),
-    place = c(
-      "pla[cć][aeiou]?", "prosje[cč]n[aeiou]+.{0,10}pla[cć]",
-      "rast.{0,10}pla[cć]", "neto.{0,10}pla[cć]", "bruto.{0,10}pla[cć]"
+    zrakoplovstvo = c(
+      "zrakoplovstv[aou]?", "borbeni?.{0,10}avion[aeiou]?",
+      "\\bF.?16\\b", "\\bF.?35\\b", "zra[cč]n[aeiou]+.{0,10}napad",
+      "bombardiranj[aeu]?"
+    ),
+    mornarica = c(
+      "mornaric[aeiou]?", "ratn[aeiou]+.{0,10}brod[aeiou]?",
+      "podmornic[aeiou]?", "flot[aeiou]?",
+      "pomorsk[aeiou]+.{0,10}snag[aeiou]?"
+    ),
+    dronovi = c(
+      "dron[aeiou]?", "bespilotna?.{0,10}letjelic[aeiou]?",
+      "\\bUAV\\b", "\\bUCAV\\b", "kamikaza.{0,10}dron"
+    ),
+    rakete = c(
+      "raket[aeiou]?", "projektil[aeiou]?", "balisti[cč]k[aeiou]+",
+      "krstarec[aeiou]+.{0,10}raket[aeiou]?", "hipersoni[cč]n[aeiou]+",
+      "protuzra[cč]n[aeiou]+.{0,10}obran[aeiou]?", "\\bPVO\\b"
+    ),
+    nuklearno = c(
+      "nuklearn[aeiou]+", "atomsk[aeiou]+", "nukleark[aeiou]?",
+      "nuklearno?.{0,10}oru[zž]je", "\\bICBM\\b",
+      "nuklearna?.{0,10}prijetnja", "nuklearna?.{0,10}eskalacij"
+    ),
+    vojna_pomoc = c(
+      "vojn[aeiou]+.{0,10}pomo[cć][aeiou]?",
+      "isporuk[aeiou]+.{0,10}oru[zž]j[aeiou]?",
+      "vojno?.{0,10}oprema", "\\bHIMARS\\b", "\\bJavelin\\b",
+      "\\bPatriot\\b", "\\bLeopard\\b", "\\bAbrams\\b"
     )
   ),
   
-  # === 8. POSLOVNI SENTIMENT ===
-  sentiment_poslovni = list(
-    povjerenje = c(
-      "poslovn[aeiou]+.{0,10}povjerenj[aeiou]?",
-      "indeks.{0,10}povjerenj", "poslovn[aeiou]+.{0,10}klim[aeiou]?",
-      "poslovn[aeiou]+.{0,10}o[cč]ekivanj"
+  diplomacija = list(
+    diplomacija_opce = c(
+      "diplomacij[aeiou]?", "diplomatsk[aeiou]+",
+      "me[dđ]unarodni?.{0,10}odnos[aeiou]?",
+      "vanjsk[aeiou]+.{0,10}politik[aeiou]?"
     ),
-    optimizam_pesimizam = c(
-      "poslovn[aeiou]+.{0,10}optimiz", "poslovn[aeiou]+.{0,10}pesimiz",
-      "pozitivn[aeiou]+.{0,10}o[cč]ekivanj", "negativn[aeiou]+.{0,10}o[cč]ekivanj"
+    pregovori = c(
+      "pregovor[aeiou]?", "mirovni?.{0,10}pregovor",
+      "diplomatsk[aeiou]+.{0,10}(rje[sš]enj|inicijativ|napor)",
+      "posredovanj[aeu]?"
     ),
-    ankete = c(
-      "anket[aeiou]+.{0,10}(poduze[cć]|menad[zž]er|direktora?)",
-      "\\bPMI\\b", "purchasing.{0,5}manager"
+    sankcije = c(
+      "sankcij[aeiou]?", "embargo", "mjere?.{0,10}ograni[cč]enj",
+      "trgovinske?.{0,10}sankcij", "financijske?.{0,10}sankcij",
+      "zamrzavanj[aeu]+.{0,10}imovine?"
+    ),
+    summit = c(
+      "summit[aeiou]?", "sastanak.{0,10}na.{0,10}vrh",
+      "bilateralni?.{0,10}susret", "me[dđ]unarodni?.{0,10}konferencij"
+    ),
+    ujedinjeni_narodi = c(
+      "\\bUN\\b", "Ujedinjeni?.{0,10}narod[aeiou]?",
+      "Vije[cć]e?.{0,10}sigurnosti", "Generalna?.{0,10}skup[sš]tin[aeiou]?",
+      "\\bUNESCO\\b", "\\bUNHCR\\b", "rezolucij[aeiou]+.{0,10}UN"
+    ),
+    savezi_koalicije = c(
+      "savez[aeiou]?", "koalicij[aeiou]?", "partnerstv[aou]?",
+      "strate[sš]ki?.{0,10}partnerstvo", "vojn[aeiou]+.{0,10}savez"
     )
   ),
   
-  # === 9. POTROŠNJA ===
-  potrosnja = list(
-    osobna = c(
-      "osobn[aeiou]+.{0,10}potro[sš]nj[aeiou]?",
-      "potro[sš]a[cč]k[aeiou]+.{0,10}potro[sš]nj",
-      "finalna?.{0,10}potro[sš]nj"
+  terorizam_sigurnost = list(
+    terorizam = c(
+      "terorizam", "teroristi[cč]k[aeiou]+",
+      "teroristi?[cč]k[aeiou]+.{0,10}napad",
+      "atentat[aeiou]?", "samoubila[cč]k[aeiou]+.{0,10}napad"
     ),
-    potrosaci = c(
-      "potro[sš]a[cč][aeiou]?", "kupac", "kupci",
-      "potro[sš]a[cč]k[aeiou]+.{0,10}povjerenj",
-      "potro[sš]a[cč]k[aeiou]+.{0,10}sentiment"
+    islamski_ekstremizam = c(
+      "d[zž]ihadis?t[aeiou]+", "d[zž]ihad[aeiou]?",
+      "\\bISIS\\b", "\\bISIL\\b", "Islamsk[aeiou]+.{0,10}dr[zž]av[aeiou]?",
+      "Al.?Kaid[aeiou]?", "Al.?Qaeda"
     ),
-    stednja = c(
-      "[sš]tednj[aeiou]?", "deponiran[aeiou]?",
-      "odr[zž]iv[aeiou]+.{0,10}potro[sš]nj"
+    kiberneticka_sigurnost = c(
+      "kiberneti[cč]k[aeiou]+.{0,10}(napad|rat|sigurnost)",
+      "cyber.?(napad|rat|sigurnost)", "haker[aeiou]?",
+      "kiberneti[cč]k[aeiou]+.{0,10}prijetn"
+    ),
+    obaviestajne_sluzbe = c(
+      "obavje[sš]tajn[aeiou]+.{0,10}slu[zž]b[aeiou]?",
+      "\\bCIA\\b", "\\bFSB\\b", "\\bMI6\\b", "\\bMossad\\b",
+      "[sš]pijuna?[zž][aeiou]?", "[sš]pijun[aeiou]?"
+    ),
+    sigurnosna_politika = c(
+      "sigurnosn[aeiou]+.{0,10}politik[aeiou]?",
+      "nacionaln[aeiou]+.{0,10}sigurnost",
+      "obran[aeiou]+.{0,10}strategi[aeiou]?"
     )
   ),
   
-  # === 10. FINANCIJSKI SEKTOR ===
-  financije = list(
-    bankarstvo = c(
-      "bank[aeiou]?", "bankars[aeikou]+.{0,10}sektor",
-      "kredit[aeiou]?", "kreditiranj[aeu]?",
-      "\\bPBZ\\b", "\\bZABA\\b", "Zagreba[cč]ka.{0,5}banka"
+  humanitarno = list(
+    izbjeglice = c(
+      "izbjegl[iaeiou]+", "prognanik[aeiou]?",
+      "izbjegli[cč]k[aeiou]+.{0,10}(kriz|val)",
+      "raselj[aeiou]+.{0,10}osob[aeiou]?", "\\bIDP\\b"
     ),
-    trziste_kapitala = c(
-      "burz[aeiou]?", "\\bZSE\\b", "\\bCROBEX\\b",
-      "dionice?", "tr[zž]i[sš]t[aeu]?.{0,10}kapital"
+    humanitarna_pomoc = c(
+      "humanitarn[aeiou]+.{0,10}pomo[cć][aeiou]?",
+      "humanitarn[aeiou]+.{0,10}kriz[aeiou]?",
+      "humanitarn[aeiou]+.{0,10}koridor",
+      "evakuacij[aeiou]?"
     ),
-    likvidnost = c(
-      "likvidnost[aeiou]?", "solventnost[aeiou]?",
-      "nov[cč]an[aeiou]+.{0,10}tok"
+    ratni_zlocini = c(
+      "ratn[aeiou]+.{0,10}zlo[cč]in[aeiou]?",
+      "zlo[cč]in[aeiou]+.{0,10}protiv.{0,10}[cč]ovje[cč]nost",
+      "\\bICC\\b", "Me[dđ]unarodni?.{0,10}kazneni?.{0,10}sud",
+      "Haag", "Den.?Haag"
+    ),
+    civilne_zrtve = c(
+      "civiln[aeiou]+.{0,10}[zž]rtv[aeiou]?",
+      "civiln[aeiou]+.{0,10}(stanovni[sš]tv|populacij)",
+      "kolateralna?.{0,10}[sš]tet[aeiou]?"
     )
   ),
   
-  # === 11. INSTITUCIONALNI OKVIR ===
-  institucije = list(
-    statistika = c(
-      "\\bDZS\\b", "Dr[zž]avn[io]?.{0,10}zavod.{0,10}statistik",
-      "\\bEurostat\\b", "statisti[cč]k[aeiou]+.{0,10}podaci"
+  energetika_resursi = list(
+    nafta_plin = c(
+      "\\bnaft[aeiou]?\\b", "\\bplin[aeiou]?\\b",
+      "prirodni?.{0,10}plin", "\\bLNG\\b",
+      "naftovod[aeiou]?", "plinovod[aeiou]?",
+      "\\bOPEC\\b"
     ),
-    centralna_banka = c(
-      "\\bHNB\\b", "Hrvatska?.{0,10}narodna?.{0,10}banka",
-      "\\bECB\\b", "guverner"
+    energetska_sigurnost = c(
+      "energetsk[aeiou]+.{0,10}sigurnost",
+      "energetsk[aeiou]+.{0,10}kriz[aeiou]?",
+      "opskrb[aeiou]+.{0,10}energij"
     ),
-    komore = c(
-      "\\bHGK\\b", "Hrvatska?.{0,10}gospodarska?.{0,10}komora",
-      "\\bHUP\\b", "udruga?.{0,10}poslodavac"
+    nord_stream = c(
+      "Nord.?Stream", "Sjeverni?.{0,10}tok",
+      "Turski?.{0,10}tok", "Turkish.?Stream"
     ),
-    vlada = c(
-      "Vlad[aeiou]?.{0,10}(RH|Republike|Hrvatski)",
-      "ministarstvo?.{0,10}gospodar",
-      "ministarstvo?.{0,10}financij"
+    kriticna_infrastruktura = c(
+      "kriti[cč]n[aeiou]+.{0,10}infrastruktur[aeiou]?",
+      "sabota[zž][aeiou]?", "diverzij[aeiou]?"
     )
   ),
   
-  # === 12. SEKTORSKI FOKUS ===
-  sektori = list(
-    it_tehnologija = c(
-      "\\bIT\\b.{0,10}sektor", "tehnolo[sš]k[aeiou]+.{0,10}sektor",
-      "digitalizacij[aeiou]?", "startup", "inovacij[aeiou]?"
+  informacijsko_ratovanje = list(
+    dezinformacije = c(
+      "dezinformacij[aeiou]?", "la[zž]ne?.{0,10}vijesti",
+      "\\bfake.?news\\b", "propaganda",
+      "informacijski?.{0,10}rat"
     ),
-    poljoprivreda = c(
-      "poljoprivred[aeiou]?", "agrarn[aeiou]+.{0,10}sektor",
-      "[zž]etv[aeiou]?", "urod", "prinos"
+    hibridno_ratovanje = c(
+      "hibridn[aeiou]+.{0,10}rat", "hibridna?.{0,10}prijetn",
+      "siv[aeiou]+.{0,10}zon[aeiou]?"
     ),
-    promet_logistika = c(
-      "prometn[aeiou]+.{0,10}sektor", "logistik[aeiou]?",
-      "luka", "zra[cč]n[aeiou]+.{0,10}promet", "teretni?.{0,10}promet"
+    utjecajne_operacije = c(
+      "utjecajn[aeiou]+.{0,10}operacij[aeiou]?",
+      "mije[sš]anj[aeu]+.{0,10}u.{0,10}izbor",
+      "stran[aeiou]+.{0,10}utjecaj"
     )
   )
 )
@@ -410,100 +583,117 @@ flatten_taxonomy <- function(taxonomy) {
   result
 }
 
-flat_terms <- flatten_taxonomy(activity_taxonomy)
+flat_terms <- flatten_taxonomy(geopolitical_taxonomy)
 
-tax_summary <- rbindlist(lapply(names(activity_taxonomy), function(macro) {
-  rbindlist(lapply(names(activity_taxonomy[[macro]]), function(meso) {
+tax_summary <- rbindlist(lapply(names(geopolitical_taxonomy), function(macro) {
+  rbindlist(lapply(names(geopolitical_taxonomy[[macro]]), function(meso) {
     data.table(
       Makro_kategorija = macro,
       Meso_kategorija = meso,
-      Broj_pojmova = length(activity_taxonomy[[macro]][[meso]])
+      Broj_pojmova = length(geopolitical_taxonomy[[macro]][[meso]])
     )
   }))
 }))
-```
 
-::: {.callout-note collapse="true"}
-## Kliknite za prikaz tablice strukture semantičke taksonomije
-
-```{r taxonomy-table}
-#| label: taxonomy-table
-
-kable(tax_summary, caption = "Struktura semantičke taksonomije") %>%
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
-  collapse_rows(columns = 1, valign = "top")
+kable(tax_summary, caption = "Struktura geopolitičke semantičke taksonomije") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
 :::
 
-## Sentiment i neizvjesnost leksikoni
-
-Leksikoni se definiraju korištenjem korijenskih oblika riječi (stemova) kako bi se obuhvatile sve morfološke varijante. Umjesto punih riječi koriste se skraćeni oblici koji predstavljaju korijen riječi, što omogućuje automatsko prepoznavanje svih izvedenih oblika.
+## Leksikoni sentimenta i neizvjesnosti
 
 ```{r sentiment-uncertainty-lexicons}
 #| label: sentiment-uncertainty-lexicons
 
-# Ekonomski sentiment leksikon (pozitivno/negativno) - KORIJENI RIJEČI
 sentiment_lexicon <- list(
   positive = c(
-    "rast", "porast", "poveć", "poboljš", "oporav",
-    "ekspanzi", "uzlet", "procvat", "napred", "uspje",
-    "dobit", "profit", "prihod", "investici", "ulagan",
-    "zapošljav", "nova radna mjesta", "optimiz", "povjerenj",
-    "stabili", "snažn", "jak", "rekord", "povijesni maksimum",
-    "premaši", "nadmaši", "bolji nego", "iznad očekivanja"
+    "mir", "mirovni", "primirje", "prekid vatre", "deeskalacija",
+    "pregovori", "dogovor", "sporazum", "ugovor", "potpisivanje",
+    "normalizacija", "stabilizacija", "smirivanje", "povlačenje",
+    "oslobađanje", "razmjena zarobljenika", "humanitarni koridor",
+    "diplomatsko rješenje", "suradnja", "partnerstvo", "savez",
+    "podrška", "solidarnost", "jedinstvo", "pobjednik", "pobjeda",
+    "uspjeh", "napredak", "proboj", "oslobođenje", "obrana"
   ),
   negative = c(
-    "pad", "smanj", "gubit", "kriz", "recesi",
-    "stagnaci", "usporav", "kontrakci", "propad", "kolaps",
-    "bankrot", "stečaj", "otpušt", "nezaposl", "deficit",
-    "dug", "zadužen", "inflaci", "poskuplj", "pesimiz",
-    "nesigurn", "rizik", "slab", "loš", "negativ",
-    "ispod očekivanja", "lošije nego", "problem", "poteškoć"
+    "rat", "sukob", "napad", "invazija", "agresija", "ofenziva",
+    "bombardiranje", "granatiranje", "masakr", "genocid", "zločin",
+    "žrtve", "poginuli", "ranjeni", "razaranje", "uništenje",
+    "eskalacija", "prijetnja", "ultimatum", "sankcije", "embargo",
+    "kriza", "tenzije", "napetost", "neprijateljstvo", "konfrontacija",
+    "provokacija", "incident", "povreda", "kršenje", "opasnost",
+    "poraz", "gubitak", "povlačenje", "okupacija", "anneksija",
+    "terorizam", "atentat", "otmica", "taoci"
   )
 )
 
-# Ekonomska neizvjesnost leksikon - KORIJENI RIJEČI
 uncertainty_lexicon <- c(
-  "neizvjesn", "nesigurn", "rizik", "volatil", "nepredvid",
-  "možda", "eventualno", "potencijalno", "vjerojatno", "moguć",
-  "ako", "ukoliko", "ovisno", "zavisi", "nepoznat",
-  "nejasn", "neodređen", "upitn", "dvojben", "spekulaci",
-  "strah", "zabrinut", "oprez", "pažljiv", "oklijevan",
-  "čekanj", "odgod", "zastoj", "blokad", "pregovor",
-  "preispitivan", "revizi", "korekci"
+  "neizvjesno", "nesigurno", "nepredvidivo", "rizično", "opasno",
+  "upitno", "dvojbeno", "neodređeno", "nejasno", "komplicirano",
+  "možda", "eventualno", "potencijalno", "moguće", "vjerojatno",
+  "ako", "ukoliko", "ovisno o", "pod uvjetom",
+  "scenarij", "mogućnost", "opcija", "alternativa",
+  "zabrinutost", "strah", "oprez", "upozorenje", "prijetnja",
+  "rizik", "opasnost", "ugroza",
+  "čekanje", "odgoda", "zastoj", "pat pozicija", "zamrznuti sukob",
+  "preispitivanje", "revizija", "promjena", "zaokret"
 )
 
-# Forward looking leksikon - KORIJENI RIJEČI
 forward_lexicon <- c(
-  "očekuje se", "predviđa se", "prognoz", "projekci", "plan",
-  "namjer", "strategi", "buduć", "sljedeć", "nadolazec",
-  "će", "hoće", "planira", "namjerav", "očekivan",
-  "perspektiv", "izgled", "trend", "smjer", "kretan",
-  "procjen", "scenari", "mogućnost", "potencijal"
+  "očekuje se", "predviđa se", "prognozira se", "procjenjuje se",
+  "najavljuje", "planira", "namjerava", "priprema",
+  "budući", "nadolazeći", "sljedeći", "uskoro", "ubrzo",
+  "strategija", "plan", "cilj", "namjera", "pripreme",
+  "scenarij", "mogući razvoj", "perspektiva", "izgled",
+  "upozorava", "prijeti", "najavljuje eskalaciju"
 )
 
-# Intenzitet leksikon - KORIJENI RIJEČI
 intensity_lexicon <- list(
   high = c(
-    "značajn", "znatn", "drastičn", "snažn", "jak",
-    "enorm", "golem", "masivn", "eksplozivn", "rekordn",
-    "povijesn", "bez presedana", "nikad viđen", "izvanredn"
+    "značajan", "znatan", "drastičan", "snažan", "jak",
+    "masivan", "ogroman", "bezpresedan", "povijesni",
+    "razoran", "katastrofalan", "dramatičan", "žestok",
+    "totalni", "potpuni", "apsolutni", "neviđeni"
   ),
   moderate = c(
-    "umjeren", "blag", "postupn", "lagan", "stabiln",
-    "konstantn", "ravnomjern", "očekivan", "prosječn"
+    "umjeren", "ograničen", "lokaliziran", "taktički",
+    "povremeni", "sporadičan", "izolirani"
   ),
   low = c(
-    "minimaln", "neznatn", "marginaln", "simboličn",
-    "jedva", "tek", "samo", "neznačajn"
+    "minimalan", "simboličan", "marginalan", "slab",
+    "zanemariv", "manji", "lokalni"
   )
 )
 
-cat("Definirano", length(sentiment_lexicon$positive), "pozitivnih i", 
-    length(sentiment_lexicon$negative), "negativnih sentiment korijena\n")
-cat("Definirano", length(uncertainty_lexicon), "neizvjesnost korijena\n")
-cat("Definirano", length(forward_lexicon), "forward looking korijena\n")
+actor_lexicon <- list(
+  state = c(
+    "država", "vlada", "predsjednik", "premijer", "ministar",
+    "ministarstvo", "parlament", "vojska", "armija"
+  ),
+  nonstate = c(
+    "pobunjenici", "milicija", "teroristi", "militanti",
+    "ekstremisti", "separatisti", "gerilci", "plaćenici"
+  ),
+  international = c(
+    "UN", "NATO", "EU", "međunarodna zajednica", "koalicija",
+    "mirovne snage", "humanitarne organizacije"
+  )
+)
+
+lexicon_summary <- data.table(
+  Leksikon = c("Deeskalacija", "Eskalacija", "Neizvjesnost", "Forward looking", 
+               "Intenzitet visoki", "Intenzitet niski", "Akteri državni", 
+               "Akteri nedržavni", "Akteri međunarodni"),
+  Broj_pojmova = c(length(sentiment_lexicon$positive), length(sentiment_lexicon$negative),
+                   length(uncertainty_lexicon), length(forward_lexicon),
+                   length(intensity_lexicon$high), length(intensity_lexicon$low),
+                   length(actor_lexicon$state), length(actor_lexicon$nonstate),
+                   length(actor_lexicon$international))
+)
+
+kable(lexicon_summary, caption = "Pregled leksikona") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
 ## Brojanje pojmova
@@ -515,52 +705,44 @@ count_patterns <- function(text, patterns) {
   if (is.na(text) || text == "") return(0)
   text_lower <- tolower(text)
   sum(sapply(patterns, function(p) {
-    # Svaki pattern se tretira kao korijen - traži se bilo koja riječ koja počinje tim korijenom
     tryCatch(stri_count_regex(text_lower, p), error = function(e) 0)
   }))
 }
 
-# Broji sve kategorije iz taksonomije
 for (cat_name in names(flat_terms)) {
-  col_name <- paste0("sem_", cat_name)
+  col_name <- paste0("geo_", cat_name)
   dt[, (col_name) := sapply(FULL_TEXT, count_patterns, patterns = flat_terms[[cat_name]])]
 }
 
-# Agregatne mjere po makro kategorijama
 macro_categories <- unique(tax_summary$Makro_kategorija)
 
 for (macro in macro_categories) {
   meso_cats <- tax_summary[Makro_kategorija == macro, Meso_kategorija]
-  col_names <- paste0("sem_", macro, "_", meso_cats)
+  col_names <- paste0("geo_", macro, "_", meso_cats)
   existing_cols <- col_names[col_names %in% names(dt)]
   if (length(existing_cols) > 0) {
     dt[, paste0("macro_", macro) := rowSums(.SD, na.rm = TRUE), .SDcols = existing_cols]
   }
 }
 
-# Sentiment scoring - koristi korijene riječi
-dt[, sent_positive := sapply(FULL_TEXT, count_patterns, patterns = sentiment_lexicon$positive)]
-dt[, sent_negative := sapply(FULL_TEXT, count_patterns, patterns = sentiment_lexicon$negative)]
-dt[, sent_net := sent_positive - sent_negative]
-dt[, sent_ratio := fifelse(sent_positive + sent_negative > 0,
-                           (sent_positive - sent_negative) / (sent_positive + sent_negative), 0)]
+dt[, sent_deescalation := sapply(FULL_TEXT, count_patterns, patterns = sentiment_lexicon$positive)]
+dt[, sent_escalation := sapply(FULL_TEXT, count_patterns, patterns = sentiment_lexicon$negative)]
+dt[, sent_net := sent_deescalation - sent_escalation]
+dt[, sent_ratio := fifelse(sent_deescalation + sent_escalation > 0,
+                           (sent_deescalation - sent_escalation) / (sent_deescalation + sent_escalation), 0)]
 
-# Uncertainty scoring
 dt[, uncertainty := sapply(FULL_TEXT, count_patterns, patterns = uncertainty_lexicon)]
-
-# Forward looking scoring
 dt[, forward_looking := sapply(FULL_TEXT, count_patterns, patterns = forward_lexicon)]
-
-# Intensity scoring
 dt[, intensity_high := sapply(FULL_TEXT, count_patterns, patterns = intensity_lexicon$high)]
 dt[, intensity_low := sapply(FULL_TEXT, count_patterns, patterns = intensity_lexicon$low)]
 dt[, intensity_net := intensity_high - intensity_low]
 
-# Ukupni semantički score
-sem_cols <- names(dt)[grepl("^sem_", names(dt))]
-dt[, semantic_total := rowSums(.SD, na.rm = TRUE), .SDcols = sem_cols]
+dt[, actor_state := sapply(FULL_TEXT, count_patterns, patterns = actor_lexicon$state)]
+dt[, actor_nonstate := sapply(FULL_TEXT, count_patterns, patterns = actor_lexicon$nonstate)]
+dt[, actor_international := sapply(FULL_TEXT, count_patterns, patterns = actor_lexicon$international)]
 
-cat("Izračunato", length(sem_cols), "semantičkih varijabli\n")
+geo_cols <- names(dt)[grepl("^geo_", names(dt))]
+dt[, geopolitical_total := rowSums(.SD, na.rm = TRUE), .SDcols = geo_cols]
 ```
 
 # Konstrukcija indeksa
@@ -571,10 +753,11 @@ cat("Izračunato", length(sem_cols), "semantičkih varijabli\n")
 #| label: monthly-aggregation
 
 macro_cols <- names(dt)[grepl("^macro_", names(dt))]
-sem_cols_all <- c(sem_cols, macro_cols, "semantic_total",
-                  "sent_positive", "sent_negative", "sent_net", "sent_ratio",
+geo_cols_all <- c(geo_cols, macro_cols, "geopolitical_total",
+                  "sent_deescalation", "sent_escalation", "sent_net", "sent_ratio",
                   "uncertainty", "forward_looking",
-                  "intensity_high", "intensity_low", "intensity_net")
+                  "intensity_high", "intensity_low", "intensity_net",
+                  "actor_state", "actor_nonstate", "actor_international")
 
 monthly <- dt[, c(
   .(N = .N,
@@ -583,47 +766,43 @@ monthly <- dt[, c(
     unique_sources = uniqueN(FROM)),
   lapply(.SD, sum, na.rm = TRUE),
   lapply(.SD, mean, na.rm = TRUE) |> setNames(paste0(names(.SD), "_avg"))
-), by = yearmonth, .SDcols = sem_cols_all][order(yearmonth)]
+), by = yearmonth, .SDcols = geo_cols_all][order(yearmonth)]
 
-# Izračunaj dodatne mjere
 monthly[, articles_per_source := N / unique_sources]
-monthly[, coverage_breadth := uniqueN(names(flat_terms)[sapply(names(flat_terms), function(x) {
-  sum(dt[yearmonth == .BY$yearmonth, get(paste0("sem_", x))], na.rm = TRUE) > 0
-})]), by = yearmonth]
-
-cat("Agregirano", nrow(monthly), "mjeseci podataka\n")
 ```
 
-## Konstrukcija sektorskih indeksa
+## TF IDF ponderiranje
 
-Sektorski indeksi kvantificiraju intenzitet medijskog pokrivanja pojedinih segmenata gospodarstva primjenom leksičke analize na korpus novinskih članaka.
+```{r tfidf-weights}
+#| label: tfidf-weights
 
-Za svaki članak u korpusu provodi se automatsko pretraživanje teksta korištenjem regularnih izraza koji detektiraju korijene riječi iz unaprijed definirane semantičke taksonomije. Algoritam iterira kroz sve pojmove unutar pojedine sektorske kategorije i broji njihova pojavljivanja. Na primjer, članak koji sadrži izraze poput industrijska proizvodnja, tvornica, proizvodni kapacitet ili energetski sektor akumulira bodove proporcionalno frekvenciji tih pojmova za kategoriju industrije. Ukupan broj detektiranih pojmova za pojedini sektor definira se kao sektorski score tog članka. Ova metodologija osigurava da članci s intenzivnijim pokrivanjem određenog sektora dobivaju proporcionalno veće vrijednosti.
+calc_idf <- function(monthly_data, col_name) {
+  N <- nrow(monthly_data)
+  df <- sum(monthly_data[[col_name]] > 0, na.rm = TRUE)
+  if (df == 0) return(0)
+  log(N / df)
+}
 
-Agregacija na mjesečnoj razini provodi se sumiranjem sektorskih bodova svih članaka objavljenih unutar istog kalendarskog mjeseca. Formalno, mjesečni sektorski indeks $S_{s,t}$ za sektor $s$ u mjesecu $t$ računa se kao: $S_{s,t} = \sum_{i \in M_t} score_{s,i}$ gdje $M_t$ označava skup svih članaka u mjesecu $t$, a $score_{s,i}$ predstavlja broj detektiranih pojmova za sektor $s$ u članku $i$. Ovaj pristup omogućuje praćenje apsolutne razine medijske pažnje posvećene svakom sektoru kroz vrijeme.
+idf_weights <- sapply(macro_cols, function(col) calc_idf(monthly, col))
+idf_weights <- idf_weights / max(idf_weights, na.rm = TRUE)
 
-Ključni sektorski indeksi obuhvaćaju četiri temeljne komponente realnog gospodarstva. Indeks industrije agregira pojmove vezane uz proizvodne aktivnosti uključujući industrijsku proizvodnju, prerađivačku industriju, energetski sektor te iskorištenost proizvodnih kapaciteta. Indeks građevinarstva prati aktivnost kroz pojmove kao što su građevinski radovi, infrastrukturni projekti, tržište nekretnina i izdane građevinske dozvole. Turistički indeks mjeri intenzitet izvještavanja o turističkim dolascima, noćenjima, smještajnim kapacitetima i sezonskoj dinamici. Trgovinski indeks obuhvaća vanjskotrgovinsku razmjenu uključujući izvoz, uvoz, trgovinsku bilancu te dinamiku maloprodajnog prometa.
+for (col in macro_cols) {
+  tfidf_col <- paste0(col, "_tfidf")
+  monthly[, (tfidf_col) := (get(col) / total_words) * idf_weights[col] * 1000]
+}
 
-::: {.callout-note collapse="true"}
-## Detaljna tehnička specifikacija sektorskih indeksa
+tfidf_cols <- paste0(macro_cols, "_tfidf")
 
-Metodologija konstrukcije sektorskih indeksa temelji se na bag of words pristupu s regularnim izrazima prilagođenima za hrvatski jezik. Svaki sektorski leksikon sadrži između 10 i 25 regex uzoraka koji pokrivaju morfološke varijante relevantnih pojmova.
+idf_table <- data.table(
+  Kategorija = gsub("macro_", "", macro_cols),
+  IDF_weight = round(idf_weights, 3)
+)[order(-IDF_weight)]
 
-**Proces ekstrakcije značajki odvija se u sljedećim koracima:**
+kable(idf_table, caption = "IDF težine po kategorijama (veća vrijednost označava veću diskriminativnost)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
 
-1. Pretprocesiranje teksta: Konverzija u mala slova (lowercase) primjenjuje se na cjelokupni tekst članka kako bi se osigurala case insensitive detekcija pojmova.
-
-2. Pattern matching: Za svaki uzorak iz sektorskog leksikona izvršava se regex pretraga korištenjem funkcije `stri_count_regex()` iz paketa stringi. Broj pronađenih podudaranja agregira se u ukupni score.
-
-3. Agregatni sektorski score: Svi meso kategorijski bodovi unutar jedne makro kategorije sumiraju se u jedinstveni makro sektorski indeks. Na primjer, makro kategorija industrije agregira bodove iz podkategorija: proizvodnja_opce, preradivacka, energetika i kapaciteti.
-
-4. Vremenska agregacija: Dnevni podaci agregiraju se na mjesečnu razinu korištenjem funkcije `floor_date()` iz paketa lubridate. Sumacija se provodi primjenom `data.table` sintakse s grupiranjem po varijabli yearmonth.
-
-**Normalizacija i interpretacija:**
-
-Sirovi mjesečni sektorski bodovi mogu se normalizirati po broju članaka kako bi se dobila prosječna sektorska gustoća, ili se mogu zadržati u apsolutnom obliku za praćenje ukupne medijske pažnje. U daljnjim analizama koristi se kombinacija obje metrike ovisno o istraživačkom pitanju.
-
-:::
+## Definicija indeksa
 
 ```{r construct-indices}
 #| label: construct-indices
@@ -639,213 +818,45 @@ standardize <- function(x) {
   if (all(is.na(x))) return(rep(0, length(x)))
   (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
 }
-```
 
-## Definicija indeksa
+monthly[, GRI := normalize_01(geopolitical_total / N) * 100]
 
-U nastavku se opisuje šest indeksa koji se koriste za mjerenje različitih aspekata gospodarske aktivnosti u medijskom diskursu.
-
-### Volume Activity Index (VAI)
-
-VAI predstavlja temeljnu mjeru ukupne zastupljenosti ekonomskog sadržaja u medijskom prostoru. Za svaki članak se zbrajaju sva pojavljivanja ekonomskih pojmova iz semantičke taksonomije, pri čemu se koriste korijeni riječi za detekciju svih morfoloških varijanti. Zatim se taj agregatni broj normalizira dijeljenjem s ukupnim brojem članaka u promatranom mjesecu, čime se dobiva prosječna gustoća ekonomskih pojmova po članku. Na kraju se provodi min max normalizacija koja skalira rezultate na raspon od 0 do 100, gdje minimalna vrijednost u cijelom vremenskom nizu postaje 0, a maksimalna vrijednost postaje 100. Viša vrijednost VAI indeksa indicira intenzivnije medijsko pokrivanje ekonomskih tema.
-
-::: {.callout-note collapse="true"}
-## Detaljna metodologija VAI indeksa
-
-**Formalna definicija:**
-
-VAI indeks za mjesec $t$ računa se prema formuli:
-
-$$VAI_t = \frac{x_t - x_{min}}{x_{max} - x_{min}} \times 100$$
-
-gdje je $x_t = \frac{\sum_{i \in M_t} semantic\_total_i}{N_t}$, pri čemu $semantic\_total_i$ predstavlja ukupan broj detektiranih ekonomskih pojmova u članku $i$, $M_t$ je skup članaka u mjesecu $t$, a $N_t$ je broj članaka u mjesecu $t$.
-
-**Interpretacijske napomene:**
-
-VAI od 100 ne znači maksimalnu moguću ekonomsku aktivnost, već označava mjesec s najvišom zabilježenom gustoćom ekonomskih pojmova unutar analiziranog vremenskog razdoblja. Analogno, VAI od 0 označava mjesec s najnižom gustoćom. Srednja vrijednost oko 50 sugerira prosječnu razinu medijske pažnje na ekonomske teme relativno na promatrano razdoblje.
-
-Prednost ovog pristupa jest njegova jednostavnost i intuitivna interpretabilnost. Ograničenje proizlazi iz osjetljivosti na ekstremne vrijednosti te nemogućnosti usporedbe između različitih vremenskih uzoraka bez ponovne normalizacije.
-
-:::
-
-### Sectoral Composite Index (SCI)
-
-SCI sintetizira dinamiku četiri ključna realna sektora gospodarstva u jedinstvenu kompozitnu mjeru. Za svaki mjesec se izračunava jednostavni aritmetički prosjek normaliziranih vrijednosti indeksa industrije, građevinarstva, trgovine i turizma. Ovaj pristup osigurava jednaku ponderiranost svih komponenti, čime se izbjegava dominacija pojedinačnog sektora nad kompozitnim indeksom. Rezultirajuća vrijednost se skalira na raspon 0 do 100 primjenom standardne min max normalizacije. SCI pruža sažetu sliku ukupne aktivnosti realnog sektora prema percepciji medija.
-
-::: {.callout-note collapse="true"}
-## Detaljna metodologija SCI indeksa
-
-**Komponente indeksa:**
-
-SCI agregira četiri sektorska indeksa koji zajedno pokrivaju ključne segmente realne ekonomije:
-
-1. **Industrija (macro_industrija)**: Proizvodna aktivnost, prerađivačka industrija, energetika
-2. **Građevinarstvo (macro_gradevinarstvo)**: Građevinski radovi, infrastruktura, nekretnine
-3. **Trgovina (macro_trgovina)**: Vanjska trgovina, izvoz, uvoz, maloprodaja
-4. **Turizam (macro_turizam)**: Turistički promet, dolasci, noćenja, smještaj
-
-**Formula izračuna:**
-
-$$SCI_t = normalize_{01}\left(\frac{1}{4}\sum_{s \in S} macro_{s,t}\right) \times 100$$
-
-gdje $S = \{industrija, gradevinarstvo, trgovina, turizam\}$ predstavlja skup komponenti.
-
-**Prednosti kompozitnog pristupa:**
-
-Jednaka ponderiranost svih sektora osigurava da niti jedan sektor ne dominira indeksom. Ovo je metodološki opravdano jer različiti sektori imaju različitu volatilnost medijske prisutnosti. Alternativni pristupi poput ponderiranja po BDP udjelu ili zaposlenosti zahtijevali bi dodatne eksterne podatke i uvodili dodatnu kompleksnost u interpretaciju.
-
-:::
-
-### Sentiment Adjusted Index (SAI)
-
-SAI nadograđuje osnovnu volume mjeru integracijom tonaliteta medijskog izvještavanja. Polazna točka je gustoća ekonomskih pojmova izračunata identično kao kod VAI indeksa. Ta se vrijednost zatim modulira faktorom koji ovisi o omjeru pozitivnih i negativnih sentiment riječi identificiranih u tekstovima korištenjem korijenskog pretraživanja. Sentiment ratio izračunava se kao razlika broja pozitivnih i negativnih pojmova podijeljena njihovim zbrojem, što rezultira vrijednošću u rasponu od minus jedan do plus jedan. Volume metrika se množi s faktorom $(1 + sentiment\_ratio)$, čime se povećava za pozitivan sentiment odnosno smanjuje za negativan. Završna normalizacija skalira rezultat na 0 do 100.
-
-::: {.callout-note collapse="true"}
-## Detaljna metodologija SAI indeksa
-
-**Dvostupanjski proces konstrukcije:**
-
-**Stupanj 1 - Ekstrakcija sentimenta:**
-
-Za svaki članak se broje pojavljivanja korijena pozitivnih riječi (rast, poveć, poboljš, uspje, optimiz...) i negativnih riječi (pad, smanj, kriz, problem, pesimiz...). Sentiment ratio računa se kao:
-
-$$SR_i = \frac{P_i - N_i}{P_i + N_i}$$
-
-gdje $P_i$ i $N_i$ označavaju broj pozitivnih odnosno negativnih pojmova u članku $i$. Vrijednost $SR_i$ kreće se od -1 (isključivo negativan sadržaj) do +1 (isključivo pozitivan sadržaj).
-
-**Stupanj 2 - Integracija s volume metrikom:**
-
-Mjesečni SAI računa se kao:
-
-$$SAI_t = normalize_{01}\left(\frac{semantic\_total_t}{N_t} \times (1 + \overline{SR_t})\right) \times 100$$
-
-gdje $\overline{SR_t}$ predstavlja prosječni sentiment ratio za mjesec $t$.
-
-**Interpretacija:**
-
-SAI iznad 50 sugerira da kombinacija volumena i sentimenta prelazi prosjek promatranog razdoblja. Budući da multiplikativni faktor $(1 + SR)$ može varirati od 0 do 2, ekstremno negativan sentiment može prepoloviti, a ekstremno pozitivan udvostručiti bazičnu volume vrijednost.
-
-:::
-
-### Uncertainty Index (UCI)
-
-UCI kvantificira razinu ekonomske neizvjesnosti percipirane kroz medijski diskurs. Konstrukcija se temelji na prebrojavanju pojavljivanja korijena riječi koje signaliziraju neizvjesnost, kao što su neizvjesn, nesigurn, rizik, volatil, nepredvid, možda, vjerojatno i slično. Suma tih pojavljivanja normalizira se brojem članaka kako bi se dobila prosječna mjesečna frekvencija pojmova neizvjesnosti. Rezultat se skalira na raspon 0 do 100 standardnom normalizacijom. Povišene vrijednosti UCI indeksa indiciraju razdoblja percipirane povećane neizvjesnosti u ekonomskom okruženju.
-
-::: {.callout-note collapse="true"}
-## Detaljna metodologija UCI indeksa
-
-**Leksikon neizvjesnosti:**
-
-UCI se temelji na specijaliziranom leksikonu koji obuhvaća 33 korijena riječi organiziranih u nekoliko semantičkih grupa:
-
-1. **Direktni izrazi neizvjesnosti**: neizvjesn, nesigurn, nepredvid, nepoznat, nejasn, neodređen
-2. **Izrazi rizika**: rizik, volatil, oprez, strah, zabrinut
-3. **Modalni izrazi**: možda, eventualno, potencijalno, vjerojatno, moguć
-4. **Kondicionalnost**: ako, ukoliko, ovisno, zavisi
-5. **Procesni zastoji**: čekanj, odgod, zastoj, blokad, oklijevan
-6. **Revizijski izrazi**: preispitivan, revizi, korekci
-
-**Teorijska utemeljenost:**
-
-Metodologija je inspirirana pristupom Baker, Bloom i Davis (2016) za konstrukciju Economic Policy Uncertainty (EPU) indeksa, adaptirana za hrvatski medijski prostor. Ključna razlika jest fokus na općeekonomsku neizvjesnost umjesto uže definirane policy neizvjesnosti.
-
-**Formula:**
-
-$$UCI_t = normalize_{01}\left(\frac{\sum_{i \in M_t} uncertainty_i}{N_t}\right) \times 100$$
-
-:::
-
-### Forward Looking Index (FLI)
-
-FLI mjeri stupanj orijentiranosti medijskog sadržaja prema budućim ekonomskim kretanjima. Indeks se konstruira prebrojavanjem korijena riječi koje impliciraju očekivanja, prognoze i planove. Relevantni pojmovi uključuju očekuje se, predviđa se, prognoz, projekci, plan, strategi, buduć, perspektiv, trend i slične. Mjesečna suma pojavljivanja normalizira se brojem članaka i skalira na 0 do 100. Viši FLI sugerira da medijski diskurs stavlja naglasak na anticipaciju budućih događaja i trendova.
-
-::: {.callout-note collapse="true"}
-## Detaljna metodologija FLI indeksa
-
-**Konceptualna osnova:**
-
-Forward looking sadržaj u ekonomskom izvještavanju signalizira aktivno planiranje i formiranje očekivanja od strane ekonomskih aktera. Povećana frekvencija takvih izraza može indicirati:
-
-1. Razdoblja intenzivnog strateškog planiranja u poslovnom sektoru
-2. Povećanu medijsku pažnju na ekonomske projekcije i prognoze
-3. Faze gospodarskog ciklusa karakterizirane neizvjesnošću oko budućih trendova
-
-**Leksikon forward looking pojmova:**
-
-Leksikon sadrži 24 korijena riječi podijeljenih u kategorije:
-
-1. **Eksplicitne prognoze**: očekuje se, predviđa se, prognoz, projekci, procjen
-2. **Planiranje**: plan, namjer, strategi
-3. **Temporalni markeri**: buduć, sljedeć, nadolazec
-4. **Futur glagoli**: će, hoće, planira, namjerav
-5. **Perspektiva**: perspektiv, izgled, trend, smjer, scenari
-
-**Komplementarnost s UCI:**
-
-FLI i UCI mogu se promatrati kao komplementarne mjere. Visok UCI uz visok FLI sugerira neizvjesnost popraćenu aktivnim promišljanjem o budućnosti. Visok UCI uz nizak FLI može indicirati paralizu odlučivanja uslijed neizvjesnosti.
-
-:::
-
-### Principal Component Index (PCI)
-
-PCI primjenjuje analizu glavnih komponenti (PCA) za ekstrakciju latentnog faktora koji objašnjava zajedničko kretanje svih sektorskih indeksa. Svi makro sektorski indeksi se prvo standardiziraju na srednju vrijednost nula i standardnu devijaciju jedan. Zatim se provodi PCA dekompozicija kovarijacijske matrice standardiziranih varijabli. Prva glavna komponenta (PC1) ekstrahira se kao linearna kombinacija koja maksimizira objašnjenu varijancu. PC1 bodovi za svaki mjesec normaliziraju se na raspon 0 do 100. PCI tako reprezentira dominantni zajednički faktor koji pokreće kretanje svih sektorskih indeksa.
-
-::: {.callout-note collapse="true"}
-## Detaljna metodologija PCI indeksa
-
-**Matematička formulacija PCA:**
-
-Za matricu standardiziranih sektorskih indeksa $\mathbf{X}$ dimenzija $T \times K$ (gdje $T$ označava broj mjeseci, a $K$ broj sektora), PCA pronalazi ortogonalnu dekompoziciju:
-
-$$\mathbf{X} = \mathbf{U} \mathbf{D} \mathbf{V}^T$$
-
-gdje $\mathbf{U}$ sadrži lijeve singularne vektore, $\mathbf{D}$ je dijagonalna matrica singularnih vrijednosti, a $\mathbf{V}$ sadrži desne singularne vektore (loadings).
-
-Prva glavna komponenta računa se kao:
-
-$$PC1_t = \sum_{k=1}^{K} v_{1k} \cdot x_{k,t}$$
-
-gdje $v_{1k}$ predstavlja loading k tog sektora na prvu komponentu.
-
-**Interpretacija loadinga:**
-
-Loadinzi pokazuju doprinos svakog sektora prvoj glavnoj komponenti. Visoki pozitivni loadinzi indiciraju sektore koji se snažno kreću zajedno s općim ekonomskim ciklusom. Negativni loadinzi bi indicirali kontracikličke sektore.
-
-**Objašnjena varijanca:**
-
-Prva glavna komponenta tipično objašnjava 40 do 60 posto ukupne varijance sektorskih indeksa, što sugerira postojanje zajedničkog faktora ekonomske aktivnosti. Preostala varijanca odražava sektorski specifične dinamike.
-
-**Prednosti PCI pristupa:**
-
-1. Statistički optimalna agregacija bez arbitrarnih pondera
-2. Robusnost na multikolinearnost među sektorima
-3. Jasna interpretacija kao latentni faktor ekonomske aktivnosti
-
-:::
-
-```{r construct-indices-2}
-#| label: construct-indices-2
-
-# === INDEKS 1: Volume Activity Index (VAI) ===
-monthly[, VAI := normalize_01(semantic_total / N) * 100]
-
-# === INDEKS 2: Sectoral Composite Index (SCI) ===
-key_sectors <- c("macro_industrija", "macro_gradevinarstvo", "macro_trgovina", "macro_turizam")
-key_sectors <- key_sectors[key_sectors %in% names(monthly)]
-if (length(key_sectors) > 0) {
-  monthly[, SCI := normalize_01(rowMeans(.SD, na.rm = TRUE)) * 100, .SDcols = key_sectors]
+conflict_cols <- c("macro_sukobi_ratovi", "macro_rusija_ukrajina", "macro_izrael_bliski_istok")
+conflict_cols <- conflict_cols[conflict_cols %in% names(monthly)]
+if (length(conflict_cols) > 0) {
+  monthly[, CII := normalize_01(rowSums(.SD / N, na.rm = TRUE)) * 100, .SDcols = conflict_cols]
 }
 
-# === INDEKS 3: Sentiment Adjusted Index (SAI) ===
-monthly[, SAI := normalize_01(semantic_total / N * (1 + sent_ratio_avg)) * 100]
+monthly[, ESI := normalize_01(-sent_ratio_avg) * 100]
 
-# === INDEKS 4: Uncertainty Index (UCI) ===
-monthly[, UCI := normalize_01(uncertainty / N) * 100]
+monthly[, GUI := normalize_01(uncertainty / N) * 100]
 
-# === INDEKS 5: Forward Looking Index (FLI) ===
-monthly[, FLI := normalize_01(forward_looking / N) * 100]
+monthly[, FGI := normalize_01(forward_looking / N) * 100]
 
-# === INDEKS 6: Principal Component Index (PCI) ===
+rui_cols <- c("macro_rusija_ukrajina")
+rui_cols <- rui_cols[rui_cols %in% names(monthly)]
+if (length(rui_cols) > 0) {
+  monthly[, RTI_E := normalize_01(rowSums(.SD / N, na.rm = TRUE)) * 100, .SDcols = rui_cols]
+}
+
+mei_cols <- c("macro_izrael_bliski_istok")
+mei_cols <- mei_cols[mei_cols %in% names(monthly)]
+if (length(mei_cols) > 0) {
+  monthly[, METI := normalize_01(rowSums(.SD / N, na.rm = TRUE)) * 100, .SDcols = mei_cols]
+}
+
+wai_cols <- c("macro_nato_zapad")
+wai_cols <- wai_cols[wai_cols %in% names(monthly)]
+if (length(wai_cols) > 0) {
+  monthly[, WAI := normalize_01(rowSums(.SD / N, na.rm = TRUE)) * 100, .SDcols = wai_cols]
+}
+
+mai_cols <- c("macro_vojska_oruzje")
+mai_cols <- mai_cols[mai_cols %in% names(monthly)]
+if (length(mai_cols) > 0) {
+  monthly[, MAI := normalize_01(rowSums(.SD / N, na.rm = TRUE)) * 100, .SDcols = mai_cols]
+}
+
 pca_data <- monthly[, .SD, .SDcols = macro_cols]
 pca_data_complete <- pca_data[complete.cases(pca_data)]
 
@@ -861,51 +872,35 @@ if (nrow(pca_data_complete) > 10 && ncol(pca_data_complete) > 2) {
   pc1_scores <- as.numeric(pca_matrix_scaled %*% pca_result$rotation[, 1])
   
   monthly[, PCI := normalize_01(pc1_scores) * 100]
-  
-  cat("PCA: PC1 objašnjava", round(var_explained[1] * 100, 1), "% varijance\n")
 } else {
-  monthly[, PCI := VAI]
+  monthly[, PCI := GRI]
 }
 
-# Klizni prosjeci
-index_cols <- c("VAI", "SCI", "SAI", "UCI", "FLI", "PCI")
+index_cols <- c("GRI", "CII", "ESI", "GUI", "FGI", "RTI_E", "METI", "WAI", "MAI", "PCI")
 for (idx in index_cols) {
   if (idx %in% names(monthly)) {
     monthly[, paste0(idx, "_MA3") := frollmean(get(idx), n = 3, align = "center")]
   }
 }
-
-cat("Konstruirano 6 indeksa\n")
 ```
 
-## Opis indeksa
+::: {.callout-note collapse="true"}
+## Opis indeksa i metodologija
 
-```{r index-descriptions}
-#| label: index-descriptions
+| Indeks | Naziv | Opis |
+|--------|-------|------|
+| GRI | Geopolitical Risk Index | Ukupna geopolitička aktivnost normalizirana po broju članaka |
+| CII | Conflict Intensity Index | Intenzitet sukoba kombiniranjem Rusija Ukrajina i Bliski Istok tematika |
+| ESI | Escalation Index | Razina eskalacije temeljena na omjeru eskalacijskih i deeskalacijskih pojmova |
+| GUI | Geopolitical Uncertainty Index | Mjera neizvjesnosti u geopolitičkom diskursu |
+| FGI | Forward Looking Geopolitical Index | Orijentacija na buduće događaje uključujući prognoze planove i očekivanja |
+| RTI_E | Regional Tension Index East | Napetosti na istoku s fokusom na Rusiju i Ukrajinu |
+| METI | Middle East Tension Index | Napetosti na Bliskom Istoku uključujući Izrael Hamas Hezbollah i Iran |
+| WAI | Western Alliance Index | Aktivnost zapadnih institucija kao što su NATO EU i SAD |
+| MAI | Military Activity Index | Vojna aktivnost i teme vezane uz oružje i vojsku |
+| PCI | Principal Component Index | Prva glavna komponenta svih makro kategorija |
 
-index_desc <- data.table(
-  Indeks = c("VAI", "SCI", "SAI", "UCI", "FLI", "PCI"),
-  Naziv = c(
-    "Volume Activity Index",
-    "Sectoral Composite Index",
-    "Sentiment Adjusted Index",
-    "Uncertainty Index",
-    "Forward Looking Index",
-    "Principal Component Index"
-  ),
-  Opis = c(
-    "Ukupan broj ekonomskih pojmova normaliziran po broju članaka",
-    "Prosjek ključnih realnih sektora (industrija, građevinarstvo, trgovina, turizam)",
-    "Volume indeks prilagođen za net sentiment (pozitivan/negativan ton)",
-    "Mjera ekonomske neizvjesnosti u medijskom diskursu",
-    "Mjera forward looking orijentacije (očekivanja, prognoze, planovi)",
-    "Prva glavna komponenta svih makro kategorija"
-  )
-)
-
-kable(index_desc, caption = "Pregled konstruiranih indeksa") %>%
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
-```
+:::
 
 # Vizualizacija indeksa
 
@@ -913,50 +908,57 @@ kable(index_desc, caption = "Pregled konstruiranih indeksa") %>%
 
 ```{r main-indices-plot}
 #| label: main-indices-plot
-#| fig-cap: "Glavni semantički indeksi gospodarske aktivnosti"
-#| fig-height: 10
+#| fig-cap: "Glavni geopolitički indeksi"
+#| fig-height: 12
 
 p1 <- ggplot(monthly, aes(x = yearmonth)) +
-  geom_line(aes(y = VAI, color = "VAI"), linewidth = 1) +
-  geom_line(aes(y = SCI, color = "SCI"), linewidth = 1) +
-  scale_color_manual(values = c("VAI" = pal$cool, "SCI" = pal$success)) +
+  geom_line(aes(y = GRI, color = "GRI"), linewidth = 1) +
+  geom_line(aes(y = CII, color = "CII"), linewidth = 1) +
+  scale_color_manual(values = c("GRI" = pal$cool, "CII" = pal$highlight)) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  labs(title = "Volume i sektorski indeksi", x = NULL, y = "Indeks (0-100)", color = NULL) +
+  labs(title = "Geopolitički rizik i intenzitet sukoba", x = NULL, y = "Indeks (0 do 100)", color = NULL) +
   theme(legend.position = "bottom")
 
 p2 <- ggplot(monthly, aes(x = yearmonth)) +
-  geom_ribbon(aes(ymin = 50, ymax = SAI), fill = pal$success, alpha = 0.3) +
-  geom_line(aes(y = SAI), color = pal$primary, linewidth = 1) +
+  geom_ribbon(aes(ymin = 50, ymax = ESI), fill = pal$highlight, alpha = 0.3) +
+  geom_line(aes(y = ESI), color = pal$danger, linewidth = 1) +
   geom_hline(yintercept = 50, linetype = "dashed", color = pal$muted) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  labs(title = "Sentiment Adjusted Index (SAI)", subtitle = "Iznad 50 = pozitivan sentiment prevladava",
-       x = NULL, y = "Indeks (0-100)")
+  labs(title = "Escalation Index (ESI)", subtitle = "Vrijednosti iznad 50 označavaju dominaciju eskalacijskog diskursa",
+       x = NULL, y = "Indeks (0 do 100)")
 
 p3 <- ggplot(monthly, aes(x = yearmonth)) +
-  geom_area(aes(y = UCI), fill = pal$highlight, alpha = 0.5) +
-  geom_line(aes(y = UCI), color = pal$highlight, linewidth = 1) +
+  geom_area(aes(y = GUI), fill = pal$purple, alpha = 0.5) +
+  geom_line(aes(y = GUI), color = pal$purple, linewidth = 1) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  labs(title = "Uncertainty Index (UCI)", x = NULL, y = "Indeks (0-100)")
+  labs(title = "Geopolitical Uncertainty Index (GUI)", x = NULL, y = "Indeks (0 do 100)")
 
-p1 / p2 / p3
+p4 <- ggplot(monthly, aes(x = yearmonth)) +
+  geom_line(aes(y = RTI_E, color = "Rusija i Ukrajina"), linewidth = 1) +
+  geom_line(aes(y = METI, color = "Bliski Istok"), linewidth = 1) +
+  scale_color_manual(values = c("Rusija i Ukrajina" = pal$cool, "Bliski Istok" = pal$warm)) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(title = "Regionalne napetosti", x = NULL, y = "Indeks (0 do 100)", color = NULL) +
+  theme(legend.position = "bottom")
+
+p1 / p2 / p3 / p4
 ```
 
-## Forward Looking vs Uncertainty
+## Vojna aktivnost i zapadni savezi
 
-```{r fli-uci-plot}
-#| label: fli-uci-plot
-#| fig-cap: "Forward Looking Index vs Uncertainty Index"
+```{r military-alliance-plot}
+#| label: military-alliance-plot
+#| fig-cap: "Vojna aktivnost i Zapadni savezi"
 #| fig-height: 6
 
 ggplot(monthly, aes(x = yearmonth)) +
-  geom_line(aes(y = FLI, color = "Forward Looking"), linewidth = 1) +
-  geom_line(aes(y = UCI, color = "Uncertainty"), linewidth = 1) +
-  scale_color_manual(values = c("Forward Looking" = pal$success, "Uncertainty" = pal$highlight)) +
+  geom_line(aes(y = MAI, color = "Vojna aktivnost"), linewidth = 1) +
+  geom_line(aes(y = WAI, color = "Zapadni savezi"), linewidth = 1) +
+  scale_color_manual(values = c("Vojna aktivnost" = pal$danger, "Zapadni savezi" = pal$cool)) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
   labs(
-    title = "Forward Looking vs Uncertainty",
-    subtitle = "Odnos između orijentacije na budućnost i neizvjesnosti",
-    x = NULL, y = "Indeks (0-100)", color = NULL
+    title = "Vojna aktivnost uspoređena s aktivnošću Zapadnih saveza (NATO EU SAD)",
+    x = NULL, y = "Indeks (0 do 100)", color = NULL
   ) +
   theme(legend.position = "bottom")
 ```
@@ -974,45 +976,61 @@ ggplot(monthly, aes(x = yearmonth)) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
   labs(
     title = "Principal Component Index (PCI)",
-    subtitle = "Tamna linija = 3 mjesečni klizni prosjek",
-    x = NULL, y = "Indeks (0-100)"
+    subtitle = "Tamna linija predstavlja tromjesečni klizni prosjek",
+    x = NULL, y = "Indeks (0 do 100)"
   )
 ```
 
-# Sektorska analiza
+# Regionalna i tematska analiza
 
-## Dinamika po sektorima
+## Dinamika po regijama i temama
 
 ```{r sector-dynamics}
 #| label: sector-dynamics
-#| fig-cap: "Dinamika sektora kroz vrijeme"
-#| fig-height: 14
+#| fig-cap: "Dinamika geopolitičkih tema kroz vrijeme"
+#| fig-height: 16
 
-key_macro <- c("macro_bdp_agregat", "macro_industrija", "macro_gradevinarstvo",
-               "macro_turizam", "macro_trgovina", "macro_investicije",
-               "macro_trziste_rada", "macro_sentiment_poslovni")
+key_macro <- c("macro_sukobi_ratovi", "macro_rusija_ukrajina", "macro_izrael_bliski_istok",
+               "macro_nato_zapad", "macro_kina_azija", "macro_balkan",
+               "macro_vojska_oruzje", "macro_diplomacija",
+               "macro_terorizam_sigurnost", "macro_humanitarno")
 key_macro <- key_macro[key_macro %in% names(monthly)]
 
 sector_long <- melt(
   monthly[, c("yearmonth", key_macro), with = FALSE],
   id.vars = "yearmonth",
-  variable.name = "sektor",
+  variable.name = "tema",
   value.name = "vrijednost"
 )
 
-sector_long[, sektor := gsub("macro_", "", sektor)]
-sector_long[, vrijednost_norm := normalize_01(vrijednost) * 100, by = sektor]
+sector_long[, tema := gsub("macro_", "", tema)]
+sector_long[, vrijednost_norm := normalize_01(vrijednost) * 100, by = tema]
+
+tema_labels <- c(
+  sukobi_ratovi = "Sukobi i ratovi",
+  rusija_ukrajina = "Rusija i Ukrajina",
+  izrael_bliski_istok = "Izrael i Bliski Istok",
+  nato_zapad = "NATO i Zapad",
+  kina_azija = "Kina i Azija",
+  balkan = "Balkan",
+  vojska_oruzje = "Vojska i Oružje",
+  diplomacija = "Diplomacija",
+  terorizam_sigurnost = "Terorizam i Sigurnost",
+  humanitarno = "Humanitarno"
+)
+
+sector_long[, tema_label := tema_labels[tema]]
 
 ggplot(sector_long, aes(x = yearmonth, y = vrijednost_norm)) +
   geom_area(fill = pal$accent, alpha = 0.3) +
   geom_line(color = pal$primary, linewidth = 0.8) +
   geom_smooth(method = "loess", se = FALSE, color = pal$highlight, linewidth = 1, span = 0.3) +
-  facet_wrap(~sektor, ncol = 2, scales = "free_y") +
+  facet_wrap(~tema_label, ncol = 2, scales = "free_y") +
   scale_x_date(date_breaks = "6 months", date_labels = "%b %y") +
   labs(
-    title = "Dinamika semantičkih sektora kroz vrijeme",
+    title = "Dinamika geopolitičkih tema kroz vrijeme",
     subtitle = "Normalizirane vrijednosti s LOESS trendom",
-    x = NULL, y = "Indeks (0-100)"
+    x = NULL, y = "Indeks (0 do 100)"
   ) +
   theme(
     strip.text = element_text(face = "bold"),
@@ -1020,41 +1038,34 @@ ggplot(sector_long, aes(x = yearmonth, y = vrijednost_norm)) +
   )
 ```
 
-## Heatmapa sektorske aktivnosti
-
-Heatmapa se konstruira transformacijom sektorskih vrijednosti na normaliziranu skalu 0 do 100 zasebno za svaki sektor, nakon čega se vrijednosti mapiraju na kontinuiranu skalu boja gdje svjetlije nijanse označavaju veći intenzitet aktivnosti u danom mjesecu.
+## Heatmapa geopolitičke aktivnosti
 
 ```{r sector-heatmap}
 #| label: sector-heatmap
-#| fig-cap: "Heatmapa sektorske aktivnosti"
+#| fig-cap: "Heatmapa geopolitičke aktivnosti"
 #| fig-height: 8
 
-heatmap_data <- sector_long[, .(yearmonth, sektor, vrijednost_norm)]
+heatmap_data <- sector_long[, .(yearmonth, tema_label, vrijednost_norm)]
 
-ggplot(heatmap_data, aes(x = yearmonth, y = sektor, fill = vrijednost_norm)) +
+ggplot(heatmap_data, aes(x = yearmonth, y = tema_label, fill = vrijednost_norm)) +
   geom_tile() +
   scale_fill_viridis_c(option = "plasma") +
   scale_x_date(date_breaks = "3 months", date_labels = "%b %y") +
   labs(
-    title = "Heatmapa sektorske medijske aktivnosti",
-    x = NULL, y = NULL, fill = "Intenzitet\n(0-100)"
+    title = "Heatmapa geopolitičke medijske aktivnosti",
+    x = NULL, y = NULL, fill = "Intenzitet\n(0 do 100)"
   ) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
 ## Korelacijska struktura
 
-Korelacijska matrica se računa primjenom Pearsonovog koeficijenta korelacije na parove varijabli, pri čemu se koristi pairwise complete observations za rukovanje nedostajućim vrijednostima.
-
 ```{r correlation-matrix}
 #| label: correlation-matrix
-#| fig-cap: "Korelacijska matrica sektora i indeksa"
-#| fig-height: 10
+#| fig-cap: "Korelacijska matrica tema i indeksa"
+#| fig-height: 12
 
-index_cols_final <- c("VAI", "SCI", "SAI", "UCI", "FLI", "PCI")
-index_cols_final <- index_cols_final[index_cols_final %in% names(monthly)]
-
-cor_vars <- c(macro_cols, index_cols_final)
+cor_vars <- c(macro_cols, "GRI", "CII", "ESI", "GUI", "FGI", "RTI_E", "METI", "WAI", "MAI", "PCI")
 cor_vars <- cor_vars[cor_vars %in% names(monthly)]
 
 cor_data <- monthly[, .SD, .SDcols = cor_vars]
@@ -1069,63 +1080,29 @@ corrplot(cor_matrix,
          order = "hclust",
          tl.col = "black",
          tl.srt = 45,
-         tl.cex = 0.7,
+         tl.cex = 0.6,
          addCoef.col = "black",
-         number.cex = 0.5,
+         number.cex = 0.4,
          col = colorRampPalette(c(pal$cool, "white", pal$highlight))(100),
-         title = "Korelacijska matrica sektora i indeksa",
+         title = "Korelacijska matrica",
          mar = c(0, 0, 2, 0))
 ```
 
-# Sentiment analiza
+# Eskalacija i Deeskalacija analiza
 
-## Konstrukcija sentiment mjera
-
-Sentiment analiza kvantificira tonalitet medijskog izvještavanja primjenom leksičkog pristupa s korijenskim pretraživanjem.
-
-Za svaki članak se provodi detekcija pozitivnih i negativnih korijena riječi iz sentiment leksikona. Pozitivni korijeni obuhvaćaju izraze poput rast, poveć, poboljš, uspje, optimiz, dok negativni uključuju pad, smanj, kriz, problem, pesimiz. Neto sentiment se izračunava kao razlika pozitivnih i negativnih pojavljivanja, a sentiment ratio se normalizira na raspon od minus jedan do plus jedan dijeljenjem razlike sa sumom.
-
-::: {.callout-note collapse="true"}
-## Detaljna metodologija sentiment analize
-
-**Leksički pristup s korijenima:**
-
-Korištenje korijena riječi umjesto punih oblika omogućuje obuhvaćanje svih morfoloških varijanti bez potrebe za eksplicitnim navođenjem svake fleksije. Na primjer, korijen rast detektira oblike: rast, rasta, rastu, rastom, rastao, rastući, rastemo itd.
-
-**Matematička formulacija:**
-
-Za članak $i$ definiramo:
-
-- $P_i$ = broj pojavljivanja pozitivnih korijena
-- $N_i$ = broj pojavljivanja negativnih korijena
-- $NetSent_i = P_i - N_i$ (neto sentiment)
-- $SR_i = \frac{P_i - N_i}{P_i + N_i}$ (sentiment ratio, nedefiniran ako $P_i = N_i = 0$)
-
-Na mjesečnoj razini se agregiraju prosječne vrijednosti:
-
-$$\overline{SR_t} = \frac{1}{|M_t|} \sum_{i \in M_t} SR_i$$
-
-**Intenzitet jezika:**
-
-Dodatna dimenzija analize obuhvaća intenzitet korištenog jezika. Korijeni visokog intenziteta (značajn, drastičn, rekordn, eksplozivn) signaliziraju snažne promjene, dok korijeni niskog intenziteta (minimaln, neznatn, blag) sugeriraju umjerene pomake. Razlika između broja pojmova visokog i niskog intenziteta pruža mjeru jezične intenzivnosti medijskog diskursa.
-
-**Validacija i ograničenja:**
-
-Leksički pristup ima poznata ograničenja uključujući nemogućnost detekcije sarkazma, negacija i kontekstualne modulacije značenja. Usprkos tome, agregatne mjesečne mjere pokazuju robustnost jer se idiosinkratski šumovi poništavaju na razini velikog broja članaka.
-
-:::
+## Sentiment komponente
 
 ```{r sentiment-components}
 #| label: sentiment-components
-#| fig-cap: "Sentiment komponente kroz vrijeme"
+#| fig-cap: "Eskalacija i Deeskalacija kroz vrijeme"
 #| fig-height: 10
 
 p_sent1 <- ggplot(monthly, aes(x = yearmonth)) +
-  geom_col(aes(y = sent_positive_avg), fill = pal$success, alpha = 0.7) +
-  geom_col(aes(y = -sent_negative_avg), fill = pal$highlight, alpha = 0.7) +
+  geom_col(aes(y = sent_deescalation_avg), fill = pal$success, alpha = 0.7) +
+  geom_col(aes(y = -sent_escalation_avg), fill = pal$highlight, alpha = 0.7) +
   geom_hline(yintercept = 0, color = "black") +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  labs(title = "Pozitivni (gore) vs Negativni (dolje) sentiment po članku",
+  labs(title = "Deeskalacija (gore) nasuprot Eskalaciji (dolje) pojmovi po članku",
        x = NULL, y = "Prosječan broj pojmova")
 
 p_sent2 <- ggplot(monthly, aes(x = yearmonth, y = sent_ratio_avg)) +
@@ -1134,108 +1111,110 @@ p_sent2 <- ggplot(monthly, aes(x = yearmonth, y = sent_ratio_avg)) +
   geom_line(color = pal$primary, linewidth = 1) +
   scale_fill_manual(values = c("TRUE" = pal$success, "FALSE" = pal$highlight), guide = "none") +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  labs(title = "Net sentiment ratio", subtitle = "(pozitivno - negativno) / (pozitivno + negativno)",
-       x = NULL, y = "Ratio (-1 do 1)")
+  labs(title = "Net sentiment ratio", subtitle = "Formula (deeskalacija minus eskalacija) podijeljena sa (deeskalacija plus eskalacija)",
+       x = NULL, y = "Ratio (od minus 1 do 1)")
 
 p_sent3 <- ggplot(monthly, aes(x = yearmonth)) +
   geom_line(aes(y = intensity_high / N * 100, color = "Visoki intenzitet"), linewidth = 1) +
   geom_line(aes(y = intensity_low / N * 100, color = "Niski intenzitet"), linewidth = 1) +
   scale_color_manual(values = c("Visoki intenzitet" = pal$highlight, "Niski intenzitet" = pal$cool)) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  labs(title = "Intenzitet jezika", x = NULL, y = "Pojmova na 100 članaka", color = NULL) +
+  labs(title = "Intenzitet geopolitičkog jezika", x = NULL, y = "Pojmova na 100 članaka", color = NULL) +
   theme(legend.position = "bottom")
 
 p_sent1 / p_sent2 / p_sent3
 ```
 
+## Tipovi aktera
+
+```{r actor-types}
+#| label: actor-types
+#| fig-cap: "Tipovi aktera u geopolitičkom diskursu"
+#| fig-height: 6
+
+actor_data <- monthly[, .(
+  yearmonth,
+  Državni = actor_state / N * 100,
+  Nedržavni = actor_nonstate / N * 100,
+  Međunarodni = actor_international / N * 100
+)]
+
+actor_long <- melt(actor_data, id.vars = "yearmonth", variable.name = "Tip", value.name = "Frekvencija")
+
+ggplot(actor_long, aes(x = yearmonth, y = Frekvencija, fill = Tip)) +
+  geom_area(alpha = 0.7, position = "stack") +
+  scale_fill_manual(values = c("Državni" = pal$cool, "Nedržavni" = pal$highlight, "Međunarodni" = pal$success)) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(
+    title = "Tipovi aktera u geopolitičkom diskursu",
+    subtitle = "Relativna zastupljenost po tipu aktera",
+    x = NULL, y = "Pojmova na 100 članaka", fill = "Tip aktera"
+  ) +
+  theme(legend.position = "bottom")
+```
+
+## Odnos neizvjesnosti i eskalacije
+
+```{r uncertainty-escalation-scatter}
+#| label: uncertainty-escalation-scatter
+#| fig-cap: "Odnos neizvjesnosti i eskalacije"
+#| fig-height: 6
+
+ggplot(monthly, aes(x = GUI, y = ESI)) +
+  geom_point(aes(size = N, color = yearmonth), alpha = 0.7) +
+  geom_smooth(method = "lm", se = TRUE, color = pal$primary) +
+  scale_color_viridis_c(option = "viridis", labels = function(x) format(as.Date(x, origin = "1970-01-01"), "%b %Y")) +
+  labs(
+    title = "Neizvjesnost nasuprot Eskalaciji",
+    x = "Geopolitical Uncertainty Index", y = "Escalation Index",
+    size = "Broj članaka", color = "Mjesec"
+  ) +
+  theme(legend.position = "right")
+```
+
 # Volatilnost i momentum
-
-## Konstrukcija volatilnosti i momentuma
-
-Volatilnost i momentum su mjere dinamike koje kvantificiraju varijabilnost i smjer kretanja indeksa kroz vrijeme.
-
-Volatilnost se računa kao rolling standardna devijacija s prozorom od tri mjeseca, pri čemu se za svaki mjesec uzimaju vrijednosti tekućeg i dva prethodna mjeseca. Momentum se definira kao razlika između tekuće vrijednosti i vrijednosti s vremenskim pomakom, gdje se razlikuje mjesečni momentum (lag 1) i tromjesečni momentum (lag 3).
-
-::: {.callout-note collapse="true"}
-## Detaljna metodologija volatilnosti i momentuma
-
-**Volatilnost (Rolling Standard Deviation):**
-
-Za indeks $X$ i vremenski prozor veličine $w = 3$, volatilnost u mjesecu $t$ računa se kao:
-
-$$\sigma_t = \sqrt{\frac{1}{w-1} \sum_{j=0}^{w-1} (X_{t-j} - \bar{X}_{t,w})^2}$$
-
-gdje $\bar{X}_{t,w} = \frac{1}{w} \sum_{j=0}^{w-1} X_{t-j}$ predstavlja klizni prosjek.
-
-Visoka volatilnost indicira nestabilnost indeksa s čestim i velikim oscilacijama. Niska volatilnost sugerira stabilno kretanje bez naglih promjena. Volatilnost je korisna za identifikaciju turbulentnih razdoblja u gospodarstvu.
-
-**Momentum (Rate of Change):**
-
-Mjesečni momentum definira se kao jednostavna razlika:
-
-$$Mom_{t,1} = X_t - X_{t-1}$$
-
-Tromjesečni momentum omogućuje filtriranje kratkoročnog šuma:
-
-$$Mom_{t,3} = X_t - X_{t-3}$$
-
-Pozitivne vrijednosti indiciraju uzlazni trend, negativne silazni trend. Magnituda pokazuje brzinu promjene.
-
-**Interpretacija kombinacije:**
-
-Kombinacija volatilnosti i momentuma omogućuje karakterizaciju četiri režima:
-
-1. **Nizak momentum, niska volatilnost**: Stabilno mirovanje
-2. **Visok momentum, niska volatilnost**: Stabilan trend (rast ili pad)
-3. **Nizak momentum, visoka volatilnost**: Turbulentna stagnacija
-4. **Visok momentum, visoka volatilnost**: Turbulentna tranzicija
-
-:::
 
 ```{r volatility-momentum}
 #| label: volatility-momentum
-#| fig-cap: "Volatilnost i momentum indeksa"
+#| fig-cap: "Volatilnost i momentum geopolitičkih indeksa"
 #| fig-height: 12
 
-# Volatilnost = rolling SD
-monthly[, VAI_vol := frollapply(VAI, n = 3, FUN = sd, align = "right")]
-monthly[, SCI_vol := frollapply(SCI, n = 3, FUN = sd, align = "right")]
+monthly[, GRI_vol := frollapply(GRI, n = 3, FUN = sd, align = "right")]
+monthly[, CII_vol := frollapply(CII, n = 3, FUN = sd, align = "right")]
 
-# Momentum = M/M promjena
-monthly[, VAI_mom := VAI - shift(VAI, 1)]
-monthly[, SCI_mom := SCI - shift(SCI, 1)]
+monthly[, GRI_mom := GRI - shift(GRI, 1)]
+monthly[, CII_mom := CII - shift(CII, 1)]
 
-# 3M momentum
-monthly[, VAI_mom3 := VAI - shift(VAI, 3)]
+monthly[, GRI_mom3 := GRI - shift(GRI, 3)]
 
-p_vol <- ggplot(monthly[!is.na(VAI_vol)], aes(x = yearmonth)) +
-  geom_area(aes(y = VAI_vol), fill = pal$cool, alpha = 0.5) +
-  geom_line(aes(y = VAI_vol), color = pal$primary, linewidth = 1) +
+p_vol <- ggplot(monthly[!is.na(GRI_vol)], aes(x = yearmonth)) +
+  geom_area(aes(y = GRI_vol), fill = pal$cool, alpha = 0.5) +
+  geom_line(aes(y = GRI_vol), color = pal$primary, linewidth = 1) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  labs(title = "VAI volatilnost (3M rolling SD)", x = NULL, y = "Standardna devijacija")
+  labs(title = "GRI volatilnost (tromjesečna rolling standardna devijacija)", x = NULL, y = "Standardna devijacija")
 
-p_mom <- ggplot(monthly[!is.na(VAI_mom)], aes(x = yearmonth)) +
+p_mom <- ggplot(monthly[!is.na(GRI_mom)], aes(x = yearmonth)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = pal$muted) +
-  geom_col(aes(y = VAI_mom, fill = VAI_mom > 0), alpha = 0.7) +
-  scale_fill_manual(values = c("TRUE" = pal$success, "FALSE" = pal$highlight), guide = "none") +
+  geom_col(aes(y = GRI_mom, fill = GRI_mom > 0), alpha = 0.7) +
+  scale_fill_manual(values = c("TRUE" = pal$highlight, "FALSE" = pal$success), guide = "none") +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  labs(title = "VAI momentum (M/M promjena)", x = NULL, y = "Promjena")
+  labs(title = "GRI momentum (mjesečna promjena)", x = NULL, y = "Promjena")
 
-p_mom3 <- ggplot(monthly[!is.na(VAI_mom3)], aes(x = yearmonth)) +
+p_mom3 <- ggplot(monthly[!is.na(GRI_mom3)], aes(x = yearmonth)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = pal$muted) +
-  geom_area(aes(y = VAI_mom3, fill = VAI_mom3 > 0), alpha = 0.5) +
-  geom_line(aes(y = VAI_mom3), color = pal$primary, linewidth = 1) +
-  scale_fill_manual(values = c("TRUE" = pal$success, "FALSE" = pal$highlight), guide = "none") +
+  geom_area(aes(y = GRI_mom3, fill = GRI_mom3 > 0), alpha = 0.5) +
+  geom_line(aes(y = GRI_mom3), color = pal$primary, linewidth = 1) +
+  scale_fill_manual(values = c("TRUE" = pal$highlight, "FALSE" = pal$success), guide = "none") +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  labs(title = "VAI 3 mjesečni momentum", x = NULL, y = "Promjena")
+  labs(title = "GRI tromjesečni momentum", x = NULL, y = "Promjena")
 
 p_combined <- ggplot(monthly, aes(x = yearmonth)) +
-  geom_line(aes(y = scale(VAI)[,1], color = "VAI (std)"), linewidth = 1) +
-  geom_line(aes(y = scale(UCI)[,1], color = "UCI (std)"), linewidth = 1) +
-  geom_line(aes(y = scale(FLI)[,1], color = "FLI (std)"), linewidth = 1) +
-  scale_color_manual(values = c("VAI (std)" = pal$cool, "UCI (std)" = pal$highlight, "FLI (std)" = pal$success)) +
+  geom_line(aes(y = scale(GRI)[,1], color = "GRI (std)"), linewidth = 1) +
+  geom_line(aes(y = scale(GUI)[,1], color = "GUI (std)"), linewidth = 1) +
+  geom_line(aes(y = scale(ESI)[,1], color = "ESI (std)"), linewidth = 1) +
+  scale_color_manual(values = c("GRI (std)" = pal$cool, "GUI (std)" = pal$purple, "ESI (std)" = pal$highlight)) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  labs(title = "Standardizirani indeksi", x = NULL, y = "Z-score", color = NULL) +
+  labs(title = "Standardizirani indeksi", x = NULL, y = "Z score", color = NULL) +
   theme(legend.position = "bottom")
 
 p_vol / p_mom / p_mom3 / p_combined
@@ -1243,47 +1222,11 @@ p_vol / p_mom / p_mom3 / p_combined
 
 # Koncentracija tema
 
-## Konstrukcija mjera koncentracije
-
-Koncentracija tema kvantificira stupanj fokusiranosti medijskog izvještavanja na uži ili širi spektar ekonomskih tema.
-
-Herfindahl Hirschman indeks (HHI) se računa kao suma kvadrata udjela svake makro kategorije u ukupnom broju detektiranih pojmova. Udjeli se dobivaju dijeljenjem broja pojmova pojedine kategorije s ukupnim brojem pojmova svih kategorija u danom mjesecu. HHI vrijednosti bliže jedinici indiciraju visoku koncentraciju na manji broj tema, dok vrijednosti bliže nuli sugeriraju disperziranu distribuciju.
-
-::: {.callout-note collapse="true"}
-## Detaljna metodologija koncentracije tema
-
-**Herfindahl Hirschman Index (HHI):**
-
-Za mjesec $t$ s $K$ makro kategorija, HHI se računa kao:
-
-$$HHI_t = \sum_{k=1}^{K} s_{k,t}^2$$
-
-gdje $s_{k,t} = \frac{n_{k,t}}{\sum_{j=1}^{K} n_{j,t}}$ predstavlja udio kategorije $k$ u ukupnom broju pojmova mjeseca $t$, a $n_{k,t}$ je broj detektiranih pojmova kategorije $k$ u mjesecu $t$.
-
-**Raspon i interpretacija:**
-
-HHI teoretski varira od $\frac{1}{K}$ (savršeno jednaka distribucija) do 1 (potpuna koncentracija na jednu kategoriju). Za 12 makro kategorija, minimalni HHI iznosi približno 0.083.
-
-- **HHI > 0.25**: Visoka koncentracija, dominacija malog broja tema
-- **HHI 0.15 - 0.25**: Umjerena koncentracija
-- **HHI < 0.15**: Niska koncentracija, diverzificirano pokrivanje
-
-**Broj aktivnih tema:**
-
-Komplementarna mjera je jednostavno prebrojavanje kategorija s barem jednim pojavljivanjem. Ovaj indikator pokazuje širinu medijskog pokrivanja neovisno o relativnim udjelima.
-
-**Ekonomska interpretacija:**
-
-Povećana koncentracija može signalizirati dominantnu ekonomsku temu ili događaj koji privlači većinu medijske pažnje. Niska koncentracija sugerira uravnoteženo izvještavanje o različitim aspektima gospodarstva.
-
-:::
-
 ```{r topic-concentration}
 #| label: topic-concentration
-#| fig-cap: "Koncentracija tema"
+#| fig-cap: "Koncentracija geopolitičkih tema"
 #| fig-height: 8
 
-# Herfindahl indeks koncentracije po mjesecu
 calc_hhi <- function(values) {
   values <- values[values > 0]
   if (length(values) == 0) return(0)
@@ -1300,26 +1243,125 @@ p_hhi <- ggplot(monthly, aes(x = yearmonth, y = topic_hhi)) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
   labs(
     title = "Herfindahl indeks koncentracije tema",
-    subtitle = "Viši = fokusiranije na manje tema | Niži = disperziranije",
+    subtitle = "Više vrijednosti označavaju fokus na manje tema (npr jedan dominantan sukob) dok niže vrijednosti označavaju disperziju",
     x = NULL, y = "HHI"
   )
 
 p_count <- ggplot(monthly, aes(x = yearmonth, y = topic_count)) +
   geom_col(fill = pal$accent, alpha = 0.7) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  labs(title = "Broj aktivnih tema po mjesecu", x = NULL, y = "Broj tema s pojavljivanjem")
+  labs(title = "Broj aktivnih geopolitičkih tema po mjesecu", x = NULL, y = "Broj tema")
 
 p_hhi / p_count
 ```
+
+# Lead Lag analiza
+
+```{r lead-lag-analysis}
+#| label: lead-lag-analysis
+#| fig-cap: "Lead lag analiza između ključnih indeksa"
+#| fig-height: 8
+
+calc_ccf <- function(x, y, max_lag = 6) {
+  ccf_result <- ccf(x, y, lag.max = max_lag, plot = FALSE, na.action = na.pass)
+  data.table(
+    lag = ccf_result$lag[, 1, 1],
+    correlation = ccf_result$acf[, 1, 1]
+  )
+}
+
+if (nrow(monthly) > 12) {
+  ccf_gui_esi <- calc_ccf(monthly$GUI, monthly$ESI)
+  ccf_gui_esi[, pair := "GUI leads ESI"]
+  
+  ccf_mai_rti <- calc_ccf(monthly$MAI, monthly$RTI_E)
+  ccf_mai_rti[, pair := "MAI leads RTI_E"]
+  
+  ccf_wai_esi <- calc_ccf(monthly$WAI, monthly$ESI)
+  ccf_wai_esi[, pair := "WAI leads ESI"]
+  
+  ccf_combined <- rbindlist(list(ccf_gui_esi, ccf_mai_rti, ccf_wai_esi))
+  
+  ggplot(ccf_combined, aes(x = lag, y = correlation, fill = pair)) +
+    geom_col(position = "dodge", alpha = 0.8) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    geom_hline(yintercept = c(-0.2, 0.2), linetype = "dotted", color = pal$muted) +
+    scale_fill_manual(values = c("GUI leads ESI" = pal$purple, 
+                                  "MAI leads RTI_E" = pal$danger,
+                                  "WAI leads ESI" = pal$cool)) +
+    labs(
+      title = "Cross korelacija između indeksa s vremenskim pomakom",
+      subtitle = "Negativni lag označava da prvi indeks prethodi drugom",
+      x = "Lag (mjeseci)", y = "Korelacija", fill = "Par indeksa"
+    ) +
+    theme(legend.position = "bottom")
+}
+```
+
+# Validacija i kontrola kvalitete
+
+```{r quality-checks}
+#| label: quality-checks
+
+coverage_check <- monthly[, .(
+  min_articles = min(N),
+  max_articles = max(N),
+  avg_articles = round(mean(N), 0),
+  months_below_100 = sum(N < 100),
+  total_months = .N
+)]
+
+pattern_sample <- dt[sample(.N, min(100, .N)), .(
+  text_sample = substr(FULL_TEXT, 1, 200),
+  geo_total = geopolitical_total,
+  sent_esc = sent_escalation,
+  sent_deesc = sent_deescalation
+)]
+
+outliers_gri <- monthly[GRI > mean(GRI) + 3*sd(GRI) | GRI < mean(GRI) - 3*sd(GRI), 
+                        .(yearmonth, GRI, N)]
+
+temporal_gaps <- monthly[, .(
+  yearmonth,
+  gap_days = as.numeric(yearmonth - shift(yearmonth))
+)][gap_days > 35]
+
+quality_summary <- data.table(
+  Provjera = c("Pokrivenost razdoblja", "Minimalni članci po mjesecu", 
+               "Outlier mjeseci (GRI)", "Vremenski gapovi"),
+  Status = c(
+    ifelse(coverage_check$months_below_100 == 0, "OK", 
+           paste0(coverage_check$months_below_100, " mjeseci ispod 100 članaka")),
+    ifelse(coverage_check$min_articles >= 50, "OK", "Upozorenje"),
+    ifelse(nrow(outliers_gri) == 0, "OK", paste0(nrow(outliers_gri), " outliera")),
+    ifelse(nrow(temporal_gaps) == 0, "OK", paste0(nrow(temporal_gaps), " gapova"))
+  )
+)
+
+kable(quality_summary, caption = "Kontrola kvalitete podataka") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+::: {.callout-warning collapse="true"}
+## Napomene o ograničenjima
+
+Konstrukcija semantičkih indeksa temelji se na leksičkom pristupu koji ima inherentna ograničenja. Regularni izrazi mogu propustiti relevantne pojmove ili uključiti lažne pozitive. Normalizacija po broju članaka pretpostavlja stabilnu kvalitetu medijskog izvještavanja kroz vrijeme. PCA komponenta ovisi o strukturi korelacija u uzorku i može varirati s promjenama u fokusima medijskog izvještavanja.
+
+Preporučuje se periodička validacija uzoraka tekstova i usporedba s eksternim pokazateljima geopolitičkog rizika.
+
+:::
 
 # Korelacije između indeksa
 
 ```{r index-correlations}
 #| label: index-correlations
 
-index_only_cor <- cor(monthly[, .SD, .SDcols = index_cols_final], use = "pairwise.complete.obs")
+index_cols_final <- c("GRI", "CII", "ESI", "GUI", "FGI", "RTI_E", "METI", "WAI", "MAI", "PCI")
+index_cols_final <- index_cols_final[index_cols_final %in% names(monthly)]
 
-kable(round(index_only_cor, 3), caption = "Korelacijska matrica indeksa") %>%
+index_cor <- cor(monthly[, .SD, .SDcols = index_cols_final], use = "pairwise.complete.obs")
+
+kable(round(index_cor, 3), caption = "Korelacijska matrica geopolitičkih indeksa") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
@@ -1330,49 +1372,47 @@ kable(round(index_only_cor, 3), caption = "Korelacijska matrica indeksa") %>%
 
 wb <- createWorkbook()
 
-# Sheet 1: Glavni indeksi
 addWorksheet(wb, "Indeksi")
 export_indices <- monthly[, .(
   Datum = yearmonth,
   Broj_clanaka = N,
-  VAI, SCI, SAI, UCI, FLI, PCI,
-  VAI_MA3, SCI_MA3
+  GRI, CII, ESI, GUI, FGI, RTI_E, METI, WAI, MAI, PCI,
+  GRI_MA3, CII_MA3, ESI_MA3
 )]
 writeData(wb, "Indeksi", export_indices)
 
-# Sheet 2: Sektori
-addWorksheet(wb, "Sektori")
+addWorksheet(wb, "Teme")
 export_sectors <- monthly[, c("yearmonth", macro_cols), with = FALSE]
 names(export_sectors) <- c("Datum", gsub("macro_", "", macro_cols))
-writeData(wb, "Sektori", export_sectors)
+writeData(wb, "Teme", export_sectors)
 
-# Sheet 3: Sentiment
 addWorksheet(wb, "Sentiment")
 export_sentiment <- monthly[, .(
   Datum = yearmonth,
-  Pozitivan = sent_positive,
-  Negativan = sent_negative,
+  Deeskalacija = sent_deescalation,
+  Eskalacija = sent_escalation,
   Net = sent_net,
   Ratio = sent_ratio_avg,
   Neizvjesnost = uncertainty,
   Forward_looking = forward_looking,
   Intenzitet_visoki = intensity_high,
-  Intenzitet_niski = intensity_low
+  Intenzitet_niski = intensity_low,
+  Akteri_drzavni = actor_state,
+  Akteri_nedrzavni = actor_nonstate,
+  Akteri_medjunarodni = actor_international
 )]
 writeData(wb, "Sentiment", export_sentiment)
 
-# Sheet 4: Volatilnost
 addWorksheet(wb, "Volatilnost")
 export_vol <- monthly[, .(
   Datum = yearmonth,
-  VAI_volatilnost = VAI_vol,
-  VAI_momentum = VAI_mom,
-  VAI_momentum_3M = VAI_mom3,
+  GRI_volatilnost = GRI_vol,
+  GRI_momentum = GRI_mom,
+  GRI_momentum_3M = GRI_mom3,
   Topic_HHI = topic_hhi
 )]
 writeData(wb, "Volatilnost", export_vol)
 
-# Stilovi
 header_style <- createStyle(
   textDecoration = "bold",
   fgFill = "#1a1a2e",
@@ -1383,7 +1423,7 @@ header_style <- createStyle(
 for (sheet in names(wb)) {
   sheet_data <- switch(sheet,
     "Indeksi" = export_indices,
-    "Sektori" = export_sectors,
+    "Teme" = export_sectors,
     "Sentiment" = export_sentiment,
     "Volatilnost" = export_vol
   )
@@ -1392,10 +1432,9 @@ for (sheet in names(wb)) {
   setColWidths(wb, sheet, cols = 1:ncols, widths = "auto")
 }
 
-output_path <- here("output", "semantic_activity_indices.xlsx")
+output_path <- here("output", "geopolitical_indices.xlsx")
 dir.create(here("output"), showWarnings = FALSE, recursive = TRUE)
 saveWorkbook(wb, output_path, overwrite = TRUE)
-cat("Excel exportiran:", output_path, "\n")
 ```
 
 # Sažetak
@@ -1407,26 +1446,26 @@ summary_table <- data.table(
   Metrika = c(
     "Broj analiziranih članaka",
     "Vremenski raspon",
-    "Broj semantičkih kategorija",
-    "Broj makro sektora",
+    "Broj geopolitičkih kategorija",
+    "Broj makro tema",
     "Broj konstruiranih indeksa",
-    "Prosječni VAI",
-    "Prosječni sentiment ratio",
-    "Prosječni UCI"
+    "Prosječni GRI",
+    "Prosječni ESI (eskalacija)",
+    "Prosječni GUI (neizvjesnost)"
   ),
   Vrijednost = c(
     format(nrow(dt), big.mark = ","),
-    paste(format(date_min, "%m/%Y"), "-", format(date_max, "%m/%Y")),
-    length(sem_cols),
+    paste(format(date_min, "%m/%Y"), "do", format(date_max, "%m/%Y")),
+    length(geo_cols),
     length(macro_cols),
     length(index_cols_final),
-    round(mean(monthly$VAI, na.rm = TRUE), 1),
-    round(mean(monthly$sent_ratio_avg, na.rm = TRUE), 3),
-    round(mean(monthly$UCI, na.rm = TRUE), 1)
+    round(mean(monthly$GRI, na.rm = TRUE), 1),
+    round(mean(monthly$ESI, na.rm = TRUE), 1),
+    round(mean(monthly$GUI, na.rm = TRUE), 1)
   )
 )
 
-kable(summary_table, caption = "Sažetak analize") %>%
+kable(summary_table, caption = "Sažetak geopolitičke analize") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
@@ -1434,4 +1473,4 @@ kable(summary_table, caption = "Sažetak analize") %>%
 
 *Izvještaj generiran: `r Sys.time()`*
 
-*GIMES Research | Semantički indeks gospodarske aktivnosti v2.0*
+*GIMES Research | Semantički indeks geopolitičke nestabilnosti v1.1*

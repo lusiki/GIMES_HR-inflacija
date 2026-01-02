@@ -10,6 +10,8 @@ format:
     toc-location: left
     number-sections: true
     theme: cosmo
+    code-fold: true
+    code-summary: "Prikaži kod"
     fig-width: 11
     fig-height: 7
     df-print: paged
@@ -25,79 +27,154 @@ lang: hr
 #| label: setup
 #| include: false
 
+# Core data manipulation
 library(data.table)
-library(ggplot2)
-library(scales)
 library(lubridate)
 library(stringi)
-library(knitr)
-library(kableExtra)
-library(zoo)
-library(openxlsx)
-library(here)
+
+# Visualization
+library(ggplot2)
+library(scales)
+library(plotly)
 library(corrplot)
 library(patchwork)
 library(viridis)
 
-options(scipen = 999)
-theme_set(theme_minimal(base_size = 12))
+# Tables and output
+library(knitr)
+library(kableExtra)
+library(openxlsx)
 
-pal <- list(
-  dark = "#1a1a2e",
-  primary = "#16213e",
-  accent = "#0f3460",
-  highlight = "#e94560",
-  warm = "#f39c12",
-  cool = "#3498db",
-  success = "#27ae60",
-  muted = "#7f8c8d",
-  light = "#ecf0f1",
-  purple = "#9b59b6",
-  teal = "#1abc9c"
+# Time series
+library(zoo)
+
+# Project management
+library(here)
+
+colors_gimes <- c(
+  "primary"   = "#2C3E50",
+  "secondary" = "#E74C3C",
+  "accent"    = "#3498DB",
+  "success"   = "#27AE60",
+  "warning"   = "#F39C12",
+  "danger"    = "#C0392B",
+  "light"     = "#ECF0F1",
+  "purple"    = "#9B59B6",
+  "teal"      = "#1ABC9C",
+  "muted"     = "#7F8C8D"
 )
+
+options(scipen = 999)
+
+theme_gimes <- function() {
+  theme_minimal(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", size = 14, color = colors_gimes["primary"]),
+      plot.subtitle = element_text(size = 10, color = "gray40"),
+      panel.grid.minor = element_blank(),
+      legend.position = "bottom",
+      axis.text = element_text(size = 9),
+      strip.text = element_text(face = "bold", size = 10)
+    )
+}
+
+theme_set(theme_gimes())
 ```
 
 # Uvod
 
-Ovaj dokument konstruira semantičke indekse gospodarske aktivnosti temeljene na analizi medijskog diskursa. 
+Ovaj dokument konstruira semantičke indekse gospodarske aktivnosti temeljene na analizi medijskog diskursa. Primjenom leksičke analize na korpus novinskih članaka kvantificiraju se različiti aspekti ekonomske aktivnosti percipirani kroz medijski prostor.
+
+## Motivacija i kontekst
+
+Medijski diskurs predstavlja važan izvor informacija o percepciji gospodarskih kretanja u realnom vremenu. Tradicionalni ekonomski pokazatelji poput BDP rasta ili industrijske proizvodnje objavljuju se s vremenskim odmakom, dok medijsko izvještavanje pruža uvid u trenutnu percepciju ekonomske situacije. Ovim izvještajem se nastoji odgovoriti na ključna pitanja:
+
+1. Kako kvantificirati intenzitet medijskog pokrivanja ekonomskih tema?
+2. Kako pratiti dinamiku pojedinih sektora gospodarstva kroz medijski diskurs?
+3. Kako mjeriti sentiment i neizvjesnost u ekonomskom izvještavanju?
+4. Kako konstruirati kompozitne indekse koji sintetiziraju višestruke dimenzije ekonomske aktivnosti?
+
+## Struktura izvještaja
+
+U izvještaju se obrađuju sljedeće teme: metodologija identifikacije članaka, eksploratorni pregled podataka, semantička taksonomija pojmova, konstrukcija i vizualizacija indeksa, sektorska analiza, sentiment analiza, volatilnost i momentum te koncentracija tema.
 
 ```{r load-data}
 #| label: load-data
 
-dt <- as.data.table(read.xlsx(here("data", "activity_filtered.xlsx")))
+#dt <- as.data.table(read.xlsx(here("data", "activity_filtered.xlsx")))
+dt <- as.data.table(read.xlsx("C:/Users/lsikic/Desktop/activity_filtered.xlsx"))
 
+# Date conversion
 if (is.numeric(dt$DATE)) {
   dt[, DATE := as.Date(DATE, origin = "1899-12-30")]
 } else {
   dt[, DATE := as.Date(DATE)]
 }
 
+# Numeric conversions
 if ("text_length" %in% names(dt)) dt[, text_length := as.numeric(text_length)]
 if ("REACH" %in% names(dt)) dt[, REACH := as.numeric(REACH)]
+if ("INTERACTIONS" %in% names(dt)) dt[, INTERACTIONS := as.numeric(INTERACTIONS)]
 
+# Time variables
 dt[, `:=`(
   date = DATE,
   year = year(DATE),
   month = month(DATE),
+  week = isoweek(DATE),
   quarter = quarter(DATE),
   yearmonth = floor_date(DATE, "month"),
+  yearweek = floor_date(DATE, "week"),
   yearquarter = floor_date(DATE, "quarter")
 )]
 
+# Store date range
 date_min <- min(dt$date, na.rm = TRUE)
 date_max <- max(dt$date, na.rm = TRUE)
 
-cat("Učitano", nrow(dt), "članaka\n")
-cat("Vremenski raspon:", as.character(date_min), "do", as.character(date_max), "\n")
+cat("Učitano", format(nrow(dt), big.mark = ","), "članaka\n")
+cat("Vremenski raspon:", format(date_min, "%d.%m.%Y"), "do", format(date_max, "%d.%m.%Y"), "\n")
 ```
 
-# Eksploratorni pregled
+# Metodologija identifikacije članaka
+
+## Pregled procesa filtriranja
+
+Identifikacija relevantnih članaka se provodi kroz sedmostupanjski proces filtriranja koji osigurava visoku preciznost i relevantnost rezultata.
+
+::: {.callout-note collapse="true" title="Detaljna metodologija filtriranja"}
+
+**Filter 1: Tip izvora**
+Odabir članaka iz news portala, isključujući društvene mreže, forume i blogove.
+
+**Filter 2: Relevantni news portali**
+Ograničenje na verificirane hrvatske medijske izvore s redovitim ekonomskim izvještavanjem.
+
+**Filter 3: Minimalna duljina teksta**
+Članci s manje od 200 znakova se isključuju kao potencijalno irelevantni ili nekompletni.
+
+**Filter 4: Naslov članka**
+Provjera prisutnosti ekonomski relevantnih pojmova u naslovu članka.
+
+**Filter 5: Core pojmovi**
+Detekcija ključnih ekonomskih termina u tijelu teksta korištenjem regex uzoraka.
+
+**Filter 6: Isključivanje irelevantnog sadržaja**
+Eliminacija članaka koji sadrže isključivo sportske, zabavne ili lifestyle teme bez ekonomske komponente.
+
+**Filter 7: Hrvatski kontekst**
+Zadržavanje članaka s jasnom referencom na hrvatsko gospodarstvo ili relevantne domaće aktere.
+
+:::
+
+# Eksploratorni pregled podataka
+
+## Osnovne statistike
 
 ```{r basic-stats}
 #| label: basic-stats
 
 stats_summary <- data.table(
-
   Metrika = c(
     "Ukupan broj članaka",
     "Vremenski raspon",
@@ -120,6 +197,8 @@ kable(stats_summary, caption = "Osnovne statistike dataseta") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
+## Top izvora
+
 ```{r source-distribution}
 #| label: source-distribution
 #| fig-cap: "Top 20 izvora po broju članaka"
@@ -127,13 +206,14 @@ kable(stats_summary, caption = "Osnovne statistike dataseta") %>%
 top_sources <- dt[, .(N = .N), by = FROM][order(-N)][1:20]
 
 ggplot(top_sources, aes(x = reorder(FROM, N), y = N)) +
-  geom_col(fill = pal$primary, alpha = 0.8) +
+  geom_col(fill = colors_gimes["primary"], alpha = 0.8) +
   geom_text(aes(label = format(N, big.mark = ",")), hjust = -0.1, size = 3) +
   coord_flip() +
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
-  labs(title = "Top 20 izvora po broju članaka", x = NULL, y = "Broj članaka") +
-  theme(plot.title = element_text(face = "bold"))
+  labs(title = "Top 20 izvora po broju članaka", x = NULL, y = "Broj članaka")
 ```
+
+## Distribucija kroz vrijeme
 
 ```{r time-distribution}
 #| label: time-distribution
@@ -144,15 +224,14 @@ monthly_count <- dt[, .(N = .N), by = yearmonth][order(yearmonth)]
 monthly_count[, MA3 := frollmean(N, n = 3, align = "center")]
 
 ggplot(monthly_count, aes(x = yearmonth)) +
-  geom_col(aes(y = N), fill = pal$light, alpha = 0.7) +
-  geom_line(aes(y = MA3), color = pal$highlight, linewidth = 1.2, na.rm = TRUE) +
+  geom_col(aes(y = N), fill = colors_gimes["light"], alpha = 0.7) +
+  geom_line(aes(y = MA3), color = colors_gimes["secondary"], linewidth = 1.2, na.rm = TRUE) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
   labs(
     title = "Mjesečni broj članaka o gospodarskoj aktivnosti",
     subtitle = "Crvena linija = 3 mjesečni klizni prosjek",
     x = NULL, y = "Broj članaka"
-  ) +
-  theme(plot.title = element_text(face = "bold"))
+  )
 ```
 
 # Semantička taksonomija
@@ -438,12 +517,9 @@ kable(tax_summary, caption = "Struktura semantičke taksonomije") %>%
 
 ## Sentiment i neizvjesnost leksikoni
 
-Leksikoni se definiraju korištenjem korijenskih oblika riječi (stemova) kako bi se obuhvatile sve morfološke varijante. Umjesto punih riječi koriste se skraćeni oblici koji predstavljaju korijen riječi, što omogućuje automatsko prepoznavanje svih izvedenih oblika.
-
 ```{r sentiment-uncertainty-lexicons}
 #| label: sentiment-uncertainty-lexicons
 
-# Ekonomski sentiment leksikon (pozitivno/negativno) - KORIJENI RIJEČI
 sentiment_lexicon <- list(
   positive = c(
     "rast", "porast", "poveć", "poboljš", "oporav",
@@ -463,7 +539,6 @@ sentiment_lexicon <- list(
   )
 )
 
-# Ekonomska neizvjesnost leksikon - KORIJENI RIJEČI
 uncertainty_lexicon <- c(
   "neizvjesn", "nesigurn", "rizik", "volatil", "nepredvid",
   "možda", "eventualno", "potencijalno", "vjerojatno", "moguć",
@@ -474,7 +549,6 @@ uncertainty_lexicon <- c(
   "preispitivan", "revizi", "korekci"
 )
 
-# Forward looking leksikon - KORIJENI RIJEČI
 forward_lexicon <- c(
   "očekuje se", "predviđa se", "prognoz", "projekci", "plan",
   "namjer", "strategi", "buduć", "sljedeć", "nadolazec",
@@ -483,7 +557,6 @@ forward_lexicon <- c(
   "procjen", "scenari", "mogućnost", "potencijal"
 )
 
-# Intenzitet leksikon - KORIJENI RIJEČI
 intensity_lexicon <- list(
   high = c(
     "značajn", "znatn", "drastičn", "snažn", "jak",
@@ -515,18 +588,15 @@ count_patterns <- function(text, patterns) {
   if (is.na(text) || text == "") return(0)
   text_lower <- tolower(text)
   sum(sapply(patterns, function(p) {
-    # Svaki pattern se tretira kao korijen - traži se bilo koja riječ koja počinje tim korijenom
     tryCatch(stri_count_regex(text_lower, p), error = function(e) 0)
   }))
 }
 
-# Broji sve kategorije iz taksonomije
 for (cat_name in names(flat_terms)) {
   col_name <- paste0("sem_", cat_name)
   dt[, (col_name) := sapply(FULL_TEXT, count_patterns, patterns = flat_terms[[cat_name]])]
 }
 
-# Agregatne mjere po makro kategorijama
 macro_categories <- unique(tax_summary$Makro_kategorija)
 
 for (macro in macro_categories) {
@@ -538,25 +608,19 @@ for (macro in macro_categories) {
   }
 }
 
-# Sentiment scoring - koristi korijene riječi
 dt[, sent_positive := sapply(FULL_TEXT, count_patterns, patterns = sentiment_lexicon$positive)]
 dt[, sent_negative := sapply(FULL_TEXT, count_patterns, patterns = sentiment_lexicon$negative)]
 dt[, sent_net := sent_positive - sent_negative]
 dt[, sent_ratio := fifelse(sent_positive + sent_negative > 0,
                            (sent_positive - sent_negative) / (sent_positive + sent_negative), 0)]
 
-# Uncertainty scoring
 dt[, uncertainty := sapply(FULL_TEXT, count_patterns, patterns = uncertainty_lexicon)]
-
-# Forward looking scoring
 dt[, forward_looking := sapply(FULL_TEXT, count_patterns, patterns = forward_lexicon)]
 
-# Intensity scoring
 dt[, intensity_high := sapply(FULL_TEXT, count_patterns, patterns = intensity_lexicon$high)]
 dt[, intensity_low := sapply(FULL_TEXT, count_patterns, patterns = intensity_lexicon$low)]
 dt[, intensity_net := intensity_high - intensity_low]
 
-# Ukupni semantički score
 sem_cols <- names(dt)[grepl("^sem_", names(dt))]
 dt[, semantic_total := rowSums(.SD, na.rm = TRUE), .SDcols = sem_cols]
 
@@ -585,7 +649,6 @@ monthly <- dt[, c(
   lapply(.SD, mean, na.rm = TRUE) |> setNames(paste0(names(.SD), "_avg"))
 ), by = yearmonth, .SDcols = sem_cols_all][order(yearmonth)]
 
-# Izračunaj dodatne mjere
 monthly[, articles_per_source := N / unique_sources]
 monthly[, coverage_breadth := uniqueN(names(flat_terms)[sapply(names(flat_terms), function(x) {
   sum(dt[yearmonth == .BY$yearmonth, get(paste0("sem_", x))], na.rm = TRUE) > 0
@@ -594,34 +657,26 @@ monthly[, coverage_breadth := uniqueN(names(flat_terms)[sapply(names(flat_terms)
 cat("Agregirano", nrow(monthly), "mjeseci podataka\n")
 ```
 
-## Konstrukcija sektorskih indeksa
+## Sektorski indeksi
 
-Sektorski indeksi kvantificiraju intenzitet medijskog pokrivanja pojedinih segmenata gospodarstva primjenom leksičke analize na korpus novinskih članaka.
-
-Za svaki članak u korpusu provodi se automatsko pretraživanje teksta korištenjem regularnih izraza koji detektiraju korijene riječi iz unaprijed definirane semantičke taksonomije. Algoritam iterira kroz sve pojmove unutar pojedine sektorske kategorije i broji njihova pojavljivanja. Na primjer, članak koji sadrži izraze poput industrijska proizvodnja, tvornica, proizvodni kapacitet ili energetski sektor akumulira bodove proporcionalno frekvenciji tih pojmova za kategoriju industrije. Ukupan broj detektiranih pojmova za pojedini sektor definira se kao sektorski score tog članka. Ova metodologija osigurava da članci s intenzivnijim pokrivanjem određenog sektora dobivaju proporcionalno veće vrijednosti.
-
-Agregacija na mjesečnoj razini provodi se sumiranjem sektorskih bodova svih članaka objavljenih unutar istog kalendarskog mjeseca. Formalno, mjesečni sektorski indeks $S_{s,t}$ za sektor $s$ u mjesecu $t$ računa se kao: $S_{s,t} = \sum_{i \in M_t} score_{s,i}$ gdje $M_t$ označava skup svih članaka u mjesecu $t$, a $score_{s,i}$ predstavlja broj detektiranih pojmova za sektor $s$ u članku $i$. Ovaj pristup omogućuje praćenje apsolutne razine medijske pažnje posvećene svakom sektoru kroz vrijeme.
-
-Ključni sektorski indeksi obuhvaćaju četiri temeljne komponente realnog gospodarstva. Indeks industrije agregira pojmove vezane uz proizvodne aktivnosti uključujući industrijsku proizvodnju, prerađivačku industriju, energetski sektor te iskorištenost proizvodnih kapaciteta. Indeks građevinarstva prati aktivnost kroz pojmove kao što su građevinski radovi, infrastrukturni projekti, tržište nekretnina i izdane građevinske dozvole. Turistički indeks mjeri intenzitet izvještavanja o turističkim dolascima, noćenjima, smještajnim kapacitetima i sezonskoj dinamici. Trgovinski indeks obuhvaća vanjskotrgovinsku razmjenu uključujući izvoz, uvoz, trgovinsku bilancu te dinamiku maloprodajnog prometa.
+Sektorski indeksi kvantificiraju intenzitet medijskog pokrivanja pojedinih segmenata gospodarstva. Za svaki članak se provodi automatsko pretraživanje teksta korištenjem regex uzoraka iz semantičke taksonomije. Mjesečni sektorski indeks za sektor s u mjesecu t računa se kao suma detektiranih pojmova svih članaka u tom mjesecu, omogućujući praćenje apsolutne razine medijske pažnje kroz vrijeme. Indeks industrije agregira pojmove proizvodne aktivnosti i energetike. Indeks građevinarstva prati infrastrukturne projekte i tržište nekretnina. Turistički indeks mjeri izvještavanje o dolascima i smještajnim kapacitetima. Trgovinski indeks obuhvaća vanjskotrgovinsku razmjenu i maloprodajni promet.
 
 ::: {.callout-note collapse="true"}
-## Detaljna tehnička specifikacija sektorskih indeksa
+## Detaljna metodologija sektorskih indeksa
 
-Metodologija konstrukcije sektorskih indeksa temelji se na bag of words pristupu s regularnim izrazima prilagođenima za hrvatski jezik. Svaki sektorski leksikon sadrži između 10 i 25 regex uzoraka koji pokrivaju morfološke varijante relevantnih pojmova.
+**Proces ekstrakcije značajki:**
 
-**Proces ekstrakcije značajki odvija se u sljedećim koracima:**
+1. Pretprocesiranje teksta: Konverzija u mala slova primjenjuje se na cjelokupni tekst članka.
 
-1. Pretprocesiranje teksta: Konverzija u mala slova (lowercase) primjenjuje se na cjelokupni tekst članka kako bi se osigurala case insensitive detekcija pojmova.
+2. Pattern matching: Za svaki uzorak iz sektorskog leksikona izvršava se regex pretraga korištenjem funkcije `stri_count_regex()`.
 
-2. Pattern matching: Za svaki uzorak iz sektorskog leksikona izvršava se regex pretraga korištenjem funkcije `stri_count_regex()` iz paketa stringi. Broj pronađenih podudaranja agregira se u ukupni score.
+3. Agregatni sektorski score: Svi meso kategorijski bodovi unutar jedne makro kategorije sumiraju se u jedinstveni makro sektorski indeks.
 
-3. Agregatni sektorski score: Svi meso kategorijski bodovi unutar jedne makro kategorije sumiraju se u jedinstveni makro sektorski indeks. Na primjer, makro kategorija industrije agregira bodove iz podkategorija: proizvodnja_opce, preradivacka, energetika i kapaciteti.
+4. Vremenska agregacija: Dnevni podaci agregiraju se na mjesečnu razinu korištenjem funkcije `floor_date()`.
 
-4. Vremenska agregacija: Dnevni podaci agregiraju se na mjesečnu razinu korištenjem funkcije `floor_date()` iz paketa lubridate. Sumacija se provodi primjenom `data.table` sintakse s grupiranjem po varijabli yearmonth.
+**Normalizacija:**
 
-**Normalizacija i interpretacija:**
-
-Sirovi mjesečni sektorski bodovi mogu se normalizirati po broju članaka kako bi se dobila prosječna sektorska gustoća, ili se mogu zadržati u apsolutnom obliku za praćenje ukupne medijske pažnje. U daljnjim analizama koristi se kombinacija obje metrike ovisno o istraživačkom pitanju.
+Sirovi mjesečni sektorski bodovi mogu se normalizirati po broju članaka kako bi se dobila prosječna sektorska gustoća, ili se mogu zadržati u apsolutnom obliku za praćenje ukupne medijske pažnje.
 
 :::
 
@@ -641,102 +696,76 @@ standardize <- function(x) {
 }
 ```
 
-## Definicija indeksa
-
-U nastavku se opisuje šest indeksa koji se koriste za mjerenje različitih aspekata gospodarske aktivnosti u medijskom diskursu.
-
 ### Volume Activity Index (VAI)
 
-VAI predstavlja temeljnu mjeru ukupne zastupljenosti ekonomskog sadržaja u medijskom prostoru. Za svaki članak se zbrajaju sva pojavljivanja ekonomskih pojmova iz semantičke taksonomije, pri čemu se koriste korijeni riječi za detekciju svih morfoloških varijanti. Zatim se taj agregatni broj normalizira dijeljenjem s ukupnim brojem članaka u promatranom mjesecu, čime se dobiva prosječna gustoća ekonomskih pojmova po članku. Na kraju se provodi min max normalizacija koja skalira rezultate na raspon od 0 do 100, gdje minimalna vrijednost u cijelom vremenskom nizu postaje 0, a maksimalna vrijednost postaje 100. Viša vrijednost VAI indeksa indicira intenzivnije medijsko pokrivanje ekonomskih tema.
+VAI predstavlja temeljnu mjeru ukupne zastupljenosti ekonomskog sadržaja u medijskom prostoru. Za svaki članak se zbrajaju sva pojavljivanja ekonomskih pojmova iz semantičke taksonomije korištenjem korijenskih oblika za detekciju morfoloških varijanti. Agregatni broj se normalizira brojem članaka u promatranom mjesecu čime se dobiva prosječna gustoća ekonomskih pojmova. Min max normalizacija skalira rezultate na raspon 0 do 100 gdje minimalna vrijednost postaje 0 a maksimalna 100. Viša vrijednost VAI indicira intenzivnije medijsko pokrivanje ekonomskih tema.
 
 ::: {.callout-note collapse="true"}
 ## Detaljna metodologija VAI indeksa
 
 **Formalna definicija:**
 
-VAI indeks za mjesec $t$ računa se prema formuli:
-
 $$VAI_t = \frac{x_t - x_{min}}{x_{max} - x_{min}} \times 100$$
 
-gdje je $x_t = \frac{\sum_{i \in M_t} semantic\_total_i}{N_t}$, pri čemu $semantic\_total_i$ predstavlja ukupan broj detektiranih ekonomskih pojmova u članku $i$, $M_t$ je skup članaka u mjesecu $t$, a $N_t$ je broj članaka u mjesecu $t$.
+gdje je $x_t = \frac{\sum_{i \in M_t} semantic\_total_i}{N_t}$
 
-**Interpretacijske napomene:**
+**Interpretacija:**
 
-VAI od 100 ne znači maksimalnu moguću ekonomsku aktivnost, već označava mjesec s najvišom zabilježenom gustoćom ekonomskih pojmova unutar analiziranog vremenskog razdoblja. Analogno, VAI od 0 označava mjesec s najnižom gustoćom. Srednja vrijednost oko 50 sugerira prosječnu razinu medijske pažnje na ekonomske teme relativno na promatrano razdoblje.
-
-Prednost ovog pristupa jest njegova jednostavnost i intuitivna interpretabilnost. Ograničenje proizlazi iz osjetljivosti na ekstremne vrijednosti te nemogućnosti usporedbe između različitih vremenskih uzoraka bez ponovne normalizacije.
+VAI od 100 označava mjesec s najvišom zabilježenom gustoćom ekonomskih pojmova unutar analiziranog razdoblja. VAI od 0 označava mjesec s najnižom gustoćom. Srednja vrijednost oko 50 sugerira prosječnu razinu medijske pažnje relativno na promatrano razdoblje.
 
 :::
 
 ### Sectoral Composite Index (SCI)
 
-SCI sintetizira dinamiku četiri ključna realna sektora gospodarstva u jedinstvenu kompozitnu mjeru. Za svaki mjesec se izračunava jednostavni aritmetički prosjek normaliziranih vrijednosti indeksa industrije, građevinarstva, trgovine i turizma. Ovaj pristup osigurava jednaku ponderiranost svih komponenti, čime se izbjegava dominacija pojedinačnog sektora nad kompozitnim indeksom. Rezultirajuća vrijednost se skalira na raspon 0 do 100 primjenom standardne min max normalizacije. SCI pruža sažetu sliku ukupne aktivnosti realnog sektora prema percepciji medija.
+SCI sintetizira dinamiku četiri ključna realna sektora gospodarstva u jedinstvenu kompozitnu mjeru. Za svaki mjesec se izračunava jednostavni aritmetički prosjek normaliziranih vrijednosti indeksa industrije, građevinarstva, trgovine i turizma. Jednaka ponderiranost svih komponenti izbjegava dominaciju pojedinačnog sektora. Rezultirajuća vrijednost se skalira na raspon 0 do 100 primjenom min max normalizacije. SCI pruža sažetu sliku ukupne aktivnosti realnog sektora prema percepciji medija.
 
 ::: {.callout-note collapse="true"}
 ## Detaljna metodologija SCI indeksa
 
-**Komponente indeksa:**
-
-SCI agregira četiri sektorska indeksa koji zajedno pokrivaju ključne segmente realne ekonomije:
+**Komponente:**
 
 1. **Industrija (macro_industrija)**: Proizvodna aktivnost, prerađivačka industrija, energetika
 2. **Građevinarstvo (macro_gradevinarstvo)**: Građevinski radovi, infrastruktura, nekretnine
 3. **Trgovina (macro_trgovina)**: Vanjska trgovina, izvoz, uvoz, maloprodaja
 4. **Turizam (macro_turizam)**: Turistički promet, dolasci, noćenja, smještaj
 
-**Formula izračuna:**
+**Formula:**
 
 $$SCI_t = normalize_{01}\left(\frac{1}{4}\sum_{s \in S} macro_{s,t}\right) \times 100$$
-
-gdje $S = \{industrija, gradevinarstvo, trgovina, turizam\}$ predstavlja skup komponenti.
-
-**Prednosti kompozitnog pristupa:**
-
-Jednaka ponderiranost svih sektora osigurava da niti jedan sektor ne dominira indeksom. Ovo je metodološki opravdano jer različiti sektori imaju različitu volatilnost medijske prisutnosti. Alternativni pristupi poput ponderiranja po BDP udjelu ili zaposlenosti zahtijevali bi dodatne eksterne podatke i uvodili dodatnu kompleksnost u interpretaciju.
 
 :::
 
 ### Sentiment Adjusted Index (SAI)
 
-SAI nadograđuje osnovnu volume mjeru integracijom tonaliteta medijskog izvještavanja. Polazna točka je gustoća ekonomskih pojmova izračunata identično kao kod VAI indeksa. Ta se vrijednost zatim modulira faktorom koji ovisi o omjeru pozitivnih i negativnih sentiment riječi identificiranih u tekstovima korištenjem korijenskog pretraživanja. Sentiment ratio izračunava se kao razlika broja pozitivnih i negativnih pojmova podijeljena njihovim zbrojem, što rezultira vrijednošću u rasponu od minus jedan do plus jedan. Volume metrika se množi s faktorom $(1 + sentiment\_ratio)$, čime se povećava za pozitivan sentiment odnosno smanjuje za negativan. Završna normalizacija skalira rezultat na 0 do 100.
+SAI nadograđuje osnovnu volume mjeru integracijom tonaliteta medijskog izvještavanja. Polazna točka je gustoća ekonomskih pojmova identična VAI indeksu. Ta vrijednost se modulira faktorom koji ovisi o omjeru pozitivnih i negativnih sentiment riječi identificiranih korijenskim pretraživanjem. Sentiment ratio izračunava se kao razlika broja pozitivnih i negativnih pojmova podijeljena njihovim zbrojem što daje vrijednost u rasponu minus jedan do plus jedan. Volume metrika se množi s faktorom (1 + sentiment_ratio) čime se povećava za pozitivan odnosno smanjuje za negativan sentiment.
 
 ::: {.callout-note collapse="true"}
 ## Detaljna metodologija SAI indeksa
 
-**Dvostupanjski proces konstrukcije:**
-
-**Stupanj 1 - Ekstrakcija sentimenta:**
-
-Za svaki članak se broje pojavljivanja korijena pozitivnih riječi (rast, poveć, poboljš, uspje, optimiz...) i negativnih riječi (pad, smanj, kriz, problem, pesimiz...). Sentiment ratio računa se kao:
+**Stupanj 1 — Ekstrakcija sentimenta:**
 
 $$SR_i = \frac{P_i - N_i}{P_i + N_i}$$
 
-gdje $P_i$ i $N_i$ označavaju broj pozitivnih odnosno negativnih pojmova u članku $i$. Vrijednost $SR_i$ kreće se od -1 (isključivo negativan sadržaj) do +1 (isključivo pozitivan sadržaj).
+gdje $P_i$ i $N_i$ označavaju broj pozitivnih odnosno negativnih pojmova u članku $i$.
 
-**Stupanj 2 - Integracija s volume metrikom:**
-
-Mjesečni SAI računa se kao:
+**Stupanj 2 — Integracija s volume metrikom:**
 
 $$SAI_t = normalize_{01}\left(\frac{semantic\_total_t}{N_t} \times (1 + \overline{SR_t})\right) \times 100$$
 
-gdje $\overline{SR_t}$ predstavlja prosječni sentiment ratio za mjesec $t$.
-
 **Interpretacija:**
 
-SAI iznad 50 sugerira da kombinacija volumena i sentimenta prelazi prosjek promatranog razdoblja. Budući da multiplikativni faktor $(1 + SR)$ može varirati od 0 do 2, ekstremno negativan sentiment može prepoloviti, a ekstremno pozitivan udvostručiti bazičnu volume vrijednost.
+SAI iznad 50 sugerira da kombinacija volumena i sentimenta prelazi prosjek promatranog razdoblja.
 
 :::
 
 ### Uncertainty Index (UCI)
 
-UCI kvantificira razinu ekonomske neizvjesnosti percipirane kroz medijski diskurs. Konstrukcija se temelji na prebrojavanju pojavljivanja korijena riječi koje signaliziraju neizvjesnost, kao što su neizvjesn, nesigurn, rizik, volatil, nepredvid, možda, vjerojatno i slično. Suma tih pojavljivanja normalizira se brojem članaka kako bi se dobila prosječna mjesečna frekvencija pojmova neizvjesnosti. Rezultat se skalira na raspon 0 do 100 standardnom normalizacijom. Povišene vrijednosti UCI indeksa indiciraju razdoblja percipirane povećane neizvjesnosti u ekonomskom okruženju.
+UCI kvantificira razinu ekonomske neizvjesnosti percipirane kroz medijski diskurs. Konstrukcija se temelji na prebrojavanju pojavljivanja korijena riječi koje signaliziraju neizvjesnost kao što su neizvjesn, nesigurn, rizik, volatil, nepredvid, možda, vjerojatno i slično. Suma tih pojavljivanja normalizira se brojem članaka kako bi se dobila prosječna mjesečna frekvencija pojmova neizvjesnosti. Rezultat se skalira na raspon 0 do 100 standardnom normalizacijom. Povišene vrijednosti UCI indeksa indiciraju razdoblja percipirane povećane neizvjesnosti u ekonomskom okruženju.
 
 ::: {.callout-note collapse="true"}
 ## Detaljna metodologija UCI indeksa
 
-**Leksikon neizvjesnosti:**
-
-UCI se temelji na specijaliziranom leksikonu koji obuhvaća 33 korijena riječi organiziranih u nekoliko semantičkih grupa:
+**Leksikon neizvjesnosti obuhvaća 33 korijena riječi:**
 
 1. **Direktni izrazi neizvjesnosti**: neizvjesn, nesigurn, nepredvid, nepoznat, nejasn, neodređen
 2. **Izrazi rizika**: rizik, volatil, oprez, strah, zabrinut
@@ -744,10 +773,6 @@ UCI se temelji na specijaliziranom leksikonu koji obuhvaća 33 korijena riječi 
 4. **Kondicionalnost**: ako, ukoliko, ovisno, zavisi
 5. **Procesni zastoji**: čekanj, odgod, zastoj, blokad, oklijevan
 6. **Revizijski izrazi**: preispitivan, revizi, korekci
-
-**Teorijska utemeljenost:**
-
-Metodologija je inspirirana pristupom Baker, Bloom i Davis (2016) za konstrukciju Economic Policy Uncertainty (EPU) indeksa, adaptirana za hrvatski medijski prostor. Ključna razlika jest fokus na općeekonomsku neizvjesnost umjesto uže definirane policy neizvjesnosti.
 
 **Formula:**
 
@@ -757,22 +782,12 @@ $$UCI_t = normalize_{01}\left(\frac{\sum_{i \in M_t} uncertainty_i}{N_t}\right) 
 
 ### Forward Looking Index (FLI)
 
-FLI mjeri stupanj orijentiranosti medijskog sadržaja prema budućim ekonomskim kretanjima. Indeks se konstruira prebrojavanjem korijena riječi koje impliciraju očekivanja, prognoze i planove. Relevantni pojmovi uključuju očekuje se, predviđa se, prognoz, projekci, plan, strategi, buduć, perspektiv, trend i slične. Mjesečna suma pojavljivanja normalizira se brojem članaka i skalira na 0 do 100. Viši FLI sugerira da medijski diskurs stavlja naglasak na anticipaciju budućih događaja i trendova.
+FLI mjeri stupanj orijentiranosti medijskog sadržaja prema budućim ekonomskim kretanjima. Indeks se konstruira prebrojavanjem korijena riječi koje impliciraju očekivanja, prognoze i planove uključujući očekuje se, predviđa se, prognoz, projekci, plan, strategi, buduć, perspektiv, trend i slične. Mjesečna suma pojavljivanja normalizira se brojem članaka i skalira na 0 do 100. Viši FLI sugerira da medijski diskurs stavlja naglasak na anticipaciju budućih događaja i trendova.
 
 ::: {.callout-note collapse="true"}
 ## Detaljna metodologija FLI indeksa
 
-**Konceptualna osnova:**
-
-Forward looking sadržaj u ekonomskom izvještavanju signalizira aktivno planiranje i formiranje očekivanja od strane ekonomskih aktera. Povećana frekvencija takvih izraza može indicirati:
-
-1. Razdoblja intenzivnog strateškog planiranja u poslovnom sektoru
-2. Povećanu medijsku pažnju na ekonomske projekcije i prognoze
-3. Faze gospodarskog ciklusa karakterizirane neizvjesnošću oko budućih trendova
-
-**Leksikon forward looking pojmova:**
-
-Leksikon sadrži 24 korijena riječi podijeljenih u kategorije:
+**Leksikon sadrži 24 korijena riječi:**
 
 1. **Eksplicitne prognoze**: očekuje se, predviđa se, prognoz, projekci, procjen
 2. **Planiranje**: plan, namjer, strategi
@@ -782,38 +797,26 @@ Leksikon sadrži 24 korijena riječi podijeljenih u kategorije:
 
 **Komplementarnost s UCI:**
 
-FLI i UCI mogu se promatrati kao komplementarne mjere. Visok UCI uz visok FLI sugerira neizvjesnost popraćenu aktivnim promišljanjem o budućnosti. Visok UCI uz nizak FLI može indicirati paralizu odlučivanja uslijed neizvjesnosti.
+Visok UCI uz visok FLI sugerira neizvjesnost popraćenu aktivnim promišljanjem o budućnosti. Visok UCI uz nizak FLI može indicirati paralizu odlučivanja uslijed neizvjesnosti.
 
 :::
 
 ### Principal Component Index (PCI)
 
-PCI primjenjuje analizu glavnih komponenti (PCA) za ekstrakciju latentnog faktora koji objašnjava zajedničko kretanje svih sektorskih indeksa. Svi makro sektorski indeksi se prvo standardiziraju na srednju vrijednost nula i standardnu devijaciju jedan. Zatim se provodi PCA dekompozicija kovarijacijske matrice standardiziranih varijabli. Prva glavna komponenta (PC1) ekstrahira se kao linearna kombinacija koja maksimizira objašnjenu varijancu. PC1 bodovi za svaki mjesec normaliziraju se na raspon 0 do 100. PCI tako reprezentira dominantni zajednički faktor koji pokreće kretanje svih sektorskih indeksa.
+PCI primjenjuje analizu glavnih komponenti za ekstrakciju latentnog faktora koji objašnjava zajedničko kretanje svih sektorskih indeksa. Svi makro sektorski indeksi se prvo standardiziraju na srednju vrijednost nula i standardnu devijaciju jedan. PCA dekompozicija kovarijacijske matrice ekstrahira prvu glavnu komponentu (PC1) kao linearnu kombinaciju koja maksimizira objašnjenu varijancu. PC1 bodovi za svaki mjesec normaliziraju se na raspon 0 do 100. PCI reprezentira dominantni zajednički faktor koji pokreće kretanje svih sektorskih indeksa.
 
 ::: {.callout-note collapse="true"}
 ## Detaljna metodologija PCI indeksa
 
-**Matematička formulacija PCA:**
+**Matematička formulacija:**
 
-Za matricu standardiziranih sektorskih indeksa $\mathbf{X}$ dimenzija $T \times K$ (gdje $T$ označava broj mjeseci, a $K$ broj sektora), PCA pronalazi ortogonalnu dekompoziciju:
+Za matricu standardiziranih sektorskih indeksa $\mathbf{X}$ dimenzija $T \times K$, PCA pronalazi ortogonalnu dekompoziciju:
 
 $$\mathbf{X} = \mathbf{U} \mathbf{D} \mathbf{V}^T$$
 
-gdje $\mathbf{U}$ sadrži lijeve singularne vektore, $\mathbf{D}$ je dijagonalna matrica singularnih vrijednosti, a $\mathbf{V}$ sadrži desne singularne vektore (loadings).
-
-Prva glavna komponenta računa se kao:
+Prva glavna komponenta:
 
 $$PC1_t = \sum_{k=1}^{K} v_{1k} \cdot x_{k,t}$$
-
-gdje $v_{1k}$ predstavlja loading k tog sektora na prvu komponentu.
-
-**Interpretacija loadinga:**
-
-Loadinzi pokazuju doprinos svakog sektora prvoj glavnoj komponenti. Visoki pozitivni loadinzi indiciraju sektore koji se snažno kreću zajedno s općim ekonomskim ciklusom. Negativni loadinzi bi indicirali kontracikličke sektore.
-
-**Objašnjena varijanca:**
-
-Prva glavna komponenta tipično objašnjava 40 do 60 posto ukupne varijance sektorskih indeksa, što sugerira postojanje zajedničkog faktora ekonomske aktivnosti. Preostala varijanca odražava sektorski specifične dinamike.
 
 **Prednosti PCI pristupa:**
 
@@ -919,29 +922,31 @@ kable(index_desc, caption = "Pregled konstruiranih indeksa") %>%
 p1 <- ggplot(monthly, aes(x = yearmonth)) +
   geom_line(aes(y = VAI, color = "VAI"), linewidth = 1) +
   geom_line(aes(y = SCI, color = "SCI"), linewidth = 1) +
-  scale_color_manual(values = c("VAI" = pal$cool, "SCI" = pal$success)) +
+  scale_color_manual(values = c("VAI" = colors_gimes["accent"], "SCI" = colors_gimes["success"])) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  labs(title = "Volume i sektorski indeksi", x = NULL, y = "Indeks (0-100)", color = NULL) +
+  labs(title = "Volume Activity Index (VAI) i Sectoral Composite Index (SCI)", 
+       x = NULL, y = "Indeks (0-100)", color = NULL) +
   theme(legend.position = "bottom")
 
 p2 <- ggplot(monthly, aes(x = yearmonth)) +
-  geom_ribbon(aes(ymin = 50, ymax = SAI), fill = pal$success, alpha = 0.3) +
-  geom_line(aes(y = SAI), color = pal$primary, linewidth = 1) +
-  geom_hline(yintercept = 50, linetype = "dashed", color = pal$muted) +
+  geom_ribbon(aes(ymin = 50, ymax = SAI), fill = colors_gimes["success"], alpha = 0.3) +
+  geom_line(aes(y = SAI), color = colors_gimes["primary"], linewidth = 1) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = colors_gimes["muted"]) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  labs(title = "Sentiment Adjusted Index (SAI)", subtitle = "Iznad 50 = pozitivan sentiment prevladava",
+  labs(title = "Sentiment Adjusted Index (SAI)", 
+       subtitle = "Iznad 50 = pozitivan sentiment prevladava",
        x = NULL, y = "Indeks (0-100)")
 
 p3 <- ggplot(monthly, aes(x = yearmonth)) +
-  geom_area(aes(y = UCI), fill = pal$highlight, alpha = 0.5) +
-  geom_line(aes(y = UCI), color = pal$highlight, linewidth = 1) +
+  geom_area(aes(y = UCI), fill = colors_gimes["secondary"], alpha = 0.5) +
+  geom_line(aes(y = UCI), color = colors_gimes["secondary"], linewidth = 1) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
   labs(title = "Uncertainty Index (UCI)", x = NULL, y = "Indeks (0-100)")
 
 p1 / p2 / p3
 ```
 
-## Forward Looking vs Uncertainty
+## Forward Looking Index (FLI) vs Uncertainty Index (UCI)
 
 ```{r fli-uci-plot}
 #| label: fli-uci-plot
@@ -949,19 +954,19 @@ p1 / p2 / p3
 #| fig-height: 6
 
 ggplot(monthly, aes(x = yearmonth)) +
-  geom_line(aes(y = FLI, color = "Forward Looking"), linewidth = 1) +
-  geom_line(aes(y = UCI, color = "Uncertainty"), linewidth = 1) +
-  scale_color_manual(values = c("Forward Looking" = pal$success, "Uncertainty" = pal$highlight)) +
+  geom_line(aes(y = FLI, color = "FLI"), linewidth = 1) +
+  geom_line(aes(y = UCI, color = "UCI"), linewidth = 1) +
+  scale_color_manual(values = c("FLI" = colors_gimes["success"], "UCI" = colors_gimes["secondary"])) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
   labs(
-    title = "Forward Looking vs Uncertainty",
+    title = "Forward Looking Index (FLI) vs Uncertainty Index (UCI)",
     subtitle = "Odnos između orijentacije na budućnost i neizvjesnosti",
     x = NULL, y = "Indeks (0-100)", color = NULL
   ) +
   theme(legend.position = "bottom")
 ```
 
-## Principal Component Index
+## Principal Component Index (PCI)
 
 ```{r pci-plot}
 #| label: pci-plot
@@ -969,8 +974,8 @@ ggplot(monthly, aes(x = yearmonth)) +
 #| fig-height: 6
 
 ggplot(monthly, aes(x = yearmonth)) +
-  geom_col(aes(y = PCI), fill = pal$light, alpha = 0.7) +
-  geom_line(aes(y = PCI_MA3), color = pal$primary, linewidth = 1.2, na.rm = TRUE) +
+  geom_col(aes(y = PCI), fill = colors_gimes["light"], alpha = 0.7) +
+  geom_line(aes(y = PCI_MA3), color = colors_gimes["primary"], linewidth = 1.2, na.rm = TRUE) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
   labs(
     title = "Principal Component Index (PCI)",
@@ -1004,9 +1009,9 @@ sector_long[, sektor := gsub("macro_", "", sektor)]
 sector_long[, vrijednost_norm := normalize_01(vrijednost) * 100, by = sektor]
 
 ggplot(sector_long, aes(x = yearmonth, y = vrijednost_norm)) +
-  geom_area(fill = pal$accent, alpha = 0.3) +
-  geom_line(color = pal$primary, linewidth = 0.8) +
-  geom_smooth(method = "loess", se = FALSE, color = pal$highlight, linewidth = 1, span = 0.3) +
+  geom_area(fill = colors_gimes["accent"], alpha = 0.3) +
+  geom_line(color = colors_gimes["primary"], linewidth = 0.8) +
+  geom_smooth(method = "loess", se = FALSE, color = colors_gimes["secondary"], linewidth = 1, span = 0.3) +
   facet_wrap(~sektor, ncol = 2, scales = "free_y") +
   scale_x_date(date_breaks = "6 months", date_labels = "%b %y") +
   labs(
@@ -1021,8 +1026,6 @@ ggplot(sector_long, aes(x = yearmonth, y = vrijednost_norm)) +
 ```
 
 ## Heatmapa sektorske aktivnosti
-
-Heatmapa se konstruira transformacijom sektorskih vrijednosti na normaliziranu skalu 0 do 100 zasebno za svaki sektor, nakon čega se vrijednosti mapiraju na kontinuiranu skalu boja gdje svjetlije nijanse označavaju veći intenzitet aktivnosti u danom mjesecu.
 
 ```{r sector-heatmap}
 #| label: sector-heatmap
@@ -1043,8 +1046,6 @@ ggplot(heatmap_data, aes(x = yearmonth, y = sektor, fill = vrijednost_norm)) +
 ```
 
 ## Korelacijska struktura
-
-Korelacijska matrica se računa primjenom Pearsonovog koeficijenta korelacije na parove varijabli, pri čemu se koristi pairwise complete observations za rukovanje nedostajućim vrijednostima.
 
 ```{r correlation-matrix}
 #| label: correlation-matrix
@@ -1072,48 +1073,14 @@ corrplot(cor_matrix,
          tl.cex = 0.7,
          addCoef.col = "black",
          number.cex = 0.5,
-         col = colorRampPalette(c(pal$cool, "white", pal$highlight))(100),
+         col = colorRampPalette(c(colors_gimes["accent"], "white", colors_gimes["secondary"]))(100),
          title = "Korelacijska matrica sektora i indeksa",
          mar = c(0, 0, 2, 0))
 ```
 
 # Sentiment analiza
 
-## Konstrukcija sentiment mjera
-
-Sentiment analiza kvantificira tonalitet medijskog izvještavanja primjenom leksičkog pristupa s korijenskim pretraživanjem.
-
-Za svaki članak se provodi detekcija pozitivnih i negativnih korijena riječi iz sentiment leksikona. Pozitivni korijeni obuhvaćaju izraze poput rast, poveć, poboljš, uspje, optimiz, dok negativni uključuju pad, smanj, kriz, problem, pesimiz. Neto sentiment se izračunava kao razlika pozitivnih i negativnih pojavljivanja, a sentiment ratio se normalizira na raspon od minus jedan do plus jedan dijeljenjem razlike sa sumom.
-
-::: {.callout-note collapse="true"}
-## Detaljna metodologija sentiment analize
-
-**Leksički pristup s korijenima:**
-
-Korištenje korijena riječi umjesto punih oblika omogućuje obuhvaćanje svih morfoloških varijanti bez potrebe za eksplicitnim navođenjem svake fleksije. Na primjer, korijen rast detektira oblike: rast, rasta, rastu, rastom, rastao, rastući, rastemo itd.
-
-**Matematička formulacija:**
-
-Za članak $i$ definiramo:
-
-- $P_i$ = broj pojavljivanja pozitivnih korijena
-- $N_i$ = broj pojavljivanja negativnih korijena
-- $NetSent_i = P_i - N_i$ (neto sentiment)
-- $SR_i = \frac{P_i - N_i}{P_i + N_i}$ (sentiment ratio, nedefiniran ako $P_i = N_i = 0$)
-
-Na mjesečnoj razini se agregiraju prosječne vrijednosti:
-
-$$\overline{SR_t} = \frac{1}{|M_t|} \sum_{i \in M_t} SR_i$$
-
-**Intenzitet jezika:**
-
-Dodatna dimenzija analize obuhvaća intenzitet korištenog jezika. Korijeni visokog intenziteta (značajn, drastičn, rekordn, eksplozivn) signaliziraju snažne promjene, dok korijeni niskog intenziteta (minimaln, neznatn, blag) sugeriraju umjerene pomake. Razlika između broja pojmova visokog i niskog intenziteta pruža mjeru jezične intenzivnosti medijskog diskursa.
-
-**Validacija i ograničenja:**
-
-Leksički pristup ima poznata ograničenja uključujući nemogućnost detekcije sarkazma, negacija i kontekstualne modulacije značenja. Usprkos tome, agregatne mjesečne mjere pokazuju robustnost jer se idiosinkratski šumovi poništavaju na razini velikog broja članaka.
-
-:::
+## Sentiment komponente
 
 ```{r sentiment-components}
 #| label: sentiment-components
@@ -1121,26 +1088,28 @@ Leksički pristup ima poznata ograničenja uključujući nemogućnost detekcije 
 #| fig-height: 10
 
 p_sent1 <- ggplot(monthly, aes(x = yearmonth)) +
-  geom_col(aes(y = sent_positive_avg), fill = pal$success, alpha = 0.7) +
-  geom_col(aes(y = -sent_negative_avg), fill = pal$highlight, alpha = 0.7) +
+  geom_col(aes(y = sent_positive_avg), fill = colors_gimes["success"], alpha = 0.7) +
+  geom_col(aes(y = -sent_negative_avg), fill = colors_gimes["secondary"], alpha = 0.7) +
   geom_hline(yintercept = 0, color = "black") +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
   labs(title = "Pozitivni (gore) vs Negativni (dolje) sentiment po članku",
        x = NULL, y = "Prosječan broj pojmova")
 
 p_sent2 <- ggplot(monthly, aes(x = yearmonth, y = sent_ratio_avg)) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = pal$muted) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = colors_gimes["muted"]) +
   geom_area(aes(fill = sent_ratio_avg > 0), alpha = 0.5) +
-  geom_line(color = pal$primary, linewidth = 1) +
-  scale_fill_manual(values = c("TRUE" = pal$success, "FALSE" = pal$highlight), guide = "none") +
+  geom_line(color = colors_gimes["primary"], linewidth = 1) +
+  scale_fill_manual(values = c("TRUE" = colors_gimes["success"], "FALSE" = colors_gimes["secondary"]), guide = "none") +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  labs(title = "Net sentiment ratio", subtitle = "(pozitivno - negativno) / (pozitivno + negativno)",
-       x = NULL, y = "Ratio (-1 do 1)")
+  labs(title = "Net sentiment ratio", 
+       subtitle = "(pozitivno — negativno) / (pozitivno + negativno)",
+       x = NULL, y = "Ratio (—1 do 1)")
 
 p_sent3 <- ggplot(monthly, aes(x = yearmonth)) +
   geom_line(aes(y = intensity_high / N * 100, color = "Visoki intenzitet"), linewidth = 1) +
   geom_line(aes(y = intensity_low / N * 100, color = "Niski intenzitet"), linewidth = 1) +
-  scale_color_manual(values = c("Visoki intenzitet" = pal$highlight, "Niski intenzitet" = pal$cool)) +
+  scale_color_manual(values = c("Visoki intenzitet" = colors_gimes["secondary"], 
+                                 "Niski intenzitet" = colors_gimes["accent"])) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
   labs(title = "Intenzitet jezika", x = NULL, y = "Pojmova na 100 članaka", color = NULL) +
   theme(legend.position = "bottom")
@@ -1152,43 +1121,22 @@ p_sent1 / p_sent2 / p_sent3
 
 ## Konstrukcija volatilnosti i momentuma
 
-Volatilnost i momentum su mjere dinamike koje kvantificiraju varijabilnost i smjer kretanja indeksa kroz vrijeme.
-
-Volatilnost se računa kao rolling standardna devijacija s prozorom od tri mjeseca, pri čemu se za svaki mjesec uzimaju vrijednosti tekućeg i dva prethodna mjeseca. Momentum se definira kao razlika između tekuće vrijednosti i vrijednosti s vremenskim pomakom, gdje se razlikuje mjesečni momentum (lag 1) i tromjesečni momentum (lag 3).
+Volatilnost se računa kao rolling standardna devijacija s prozorom od tri mjeseca uzimajući vrijednosti tekućeg i dva prethodna mjeseca. Momentum se definira kao razlika između tekuće vrijednosti i vrijednosti s vremenskim pomakom, gdje mjesečni momentum koristi lag 1 a tromjesečni momentum lag 3. Kombinacija volatilnosti i momentuma omogućuje karakterizaciju četiri režima: stabilno mirovanje (nizak momentum i niska volatilnost), stabilan trend (visok momentum i niska volatilnost), turbulentna stagnacija (nizak momentum i visoka volatilnost), te turbulentna tranzicija (visok momentum i visoka volatilnost).
 
 ::: {.callout-note collapse="true"}
 ## Detaljna metodologija volatilnosti i momentuma
 
 **Volatilnost (Rolling Standard Deviation):**
 
-Za indeks $X$ i vremenski prozor veličine $w = 3$, volatilnost u mjesecu $t$ računa se kao:
-
 $$\sigma_t = \sqrt{\frac{1}{w-1} \sum_{j=0}^{w-1} (X_{t-j} - \bar{X}_{t,w})^2}$$
 
-gdje $\bar{X}_{t,w} = \frac{1}{w} \sum_{j=0}^{w-1} X_{t-j}$ predstavlja klizni prosjek.
-
-Visoka volatilnost indicira nestabilnost indeksa s čestim i velikim oscilacijama. Niska volatilnost sugerira stabilno kretanje bez naglih promjena. Volatilnost je korisna za identifikaciju turbulentnih razdoblja u gospodarstvu.
+gdje $\bar{X}_{t,w} = \frac{1}{w} \sum_{j=0}^{w-1} X_{t-j}$
 
 **Momentum (Rate of Change):**
 
-Mjesečni momentum definira se kao jednostavna razlika:
+Mjesečni: $Mom_{t,1} = X_t - X_{t-1}$
 
-$$Mom_{t,1} = X_t - X_{t-1}$$
-
-Tromjesečni momentum omogućuje filtriranje kratkoročnog šuma:
-
-$$Mom_{t,3} = X_t - X_{t-3}$$
-
-Pozitivne vrijednosti indiciraju uzlazni trend, negativne silazni trend. Magnituda pokazuje brzinu promjene.
-
-**Interpretacija kombinacije:**
-
-Kombinacija volatilnosti i momentuma omogućuje karakterizaciju četiri režima:
-
-1. **Nizak momentum, niska volatilnost**: Stabilno mirovanje
-2. **Visok momentum, niska volatilnost**: Stabilan trend (rast ili pad)
-3. **Nizak momentum, visoka volatilnost**: Turbulentna stagnacija
-4. **Visok momentum, visoka volatilnost**: Turbulentna tranzicija
+Tromjesečni: $Mom_{t,3} = X_t - X_{t-3}$
 
 :::
 
@@ -1197,35 +1145,32 @@ Kombinacija volatilnosti i momentuma omogućuje karakterizaciju četiri režima:
 #| fig-cap: "Volatilnost i momentum indeksa"
 #| fig-height: 12
 
-# Volatilnost = rolling SD
 monthly[, VAI_vol := frollapply(VAI, n = 3, FUN = sd, align = "right")]
 monthly[, SCI_vol := frollapply(SCI, n = 3, FUN = sd, align = "right")]
 
-# Momentum = M/M promjena
 monthly[, VAI_mom := VAI - shift(VAI, 1)]
 monthly[, SCI_mom := SCI - shift(SCI, 1)]
 
-# 3M momentum
 monthly[, VAI_mom3 := VAI - shift(VAI, 3)]
 
 p_vol <- ggplot(monthly[!is.na(VAI_vol)], aes(x = yearmonth)) +
-  geom_area(aes(y = VAI_vol), fill = pal$cool, alpha = 0.5) +
-  geom_line(aes(y = VAI_vol), color = pal$primary, linewidth = 1) +
+  geom_area(aes(y = VAI_vol), fill = colors_gimes["accent"], alpha = 0.5) +
+  geom_line(aes(y = VAI_vol), color = colors_gimes["primary"], linewidth = 1) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
   labs(title = "VAI volatilnost (3M rolling SD)", x = NULL, y = "Standardna devijacija")
 
 p_mom <- ggplot(monthly[!is.na(VAI_mom)], aes(x = yearmonth)) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = pal$muted) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = colors_gimes["muted"]) +
   geom_col(aes(y = VAI_mom, fill = VAI_mom > 0), alpha = 0.7) +
-  scale_fill_manual(values = c("TRUE" = pal$success, "FALSE" = pal$highlight), guide = "none") +
+  scale_fill_manual(values = c("TRUE" = colors_gimes["success"], "FALSE" = colors_gimes["secondary"]), guide = "none") +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
   labs(title = "VAI momentum (M/M promjena)", x = NULL, y = "Promjena")
 
 p_mom3 <- ggplot(monthly[!is.na(VAI_mom3)], aes(x = yearmonth)) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = pal$muted) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = colors_gimes["muted"]) +
   geom_area(aes(y = VAI_mom3, fill = VAI_mom3 > 0), alpha = 0.5) +
-  geom_line(aes(y = VAI_mom3), color = pal$primary, linewidth = 1) +
-  scale_fill_manual(values = c("TRUE" = pal$success, "FALSE" = pal$highlight), guide = "none") +
+  geom_line(aes(y = VAI_mom3), color = colors_gimes["primary"], linewidth = 1) +
+  scale_fill_manual(values = c("TRUE" = colors_gimes["success"], "FALSE" = colors_gimes["secondary"]), guide = "none") +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
   labs(title = "VAI 3 mjesečni momentum", x = NULL, y = "Promjena")
 
@@ -1233,9 +1178,11 @@ p_combined <- ggplot(monthly, aes(x = yearmonth)) +
   geom_line(aes(y = scale(VAI)[,1], color = "VAI (std)"), linewidth = 1) +
   geom_line(aes(y = scale(UCI)[,1], color = "UCI (std)"), linewidth = 1) +
   geom_line(aes(y = scale(FLI)[,1], color = "FLI (std)"), linewidth = 1) +
-  scale_color_manual(values = c("VAI (std)" = pal$cool, "UCI (std)" = pal$highlight, "FLI (std)" = pal$success)) +
+  scale_color_manual(values = c("VAI (std)" = colors_gimes["accent"], 
+                                 "UCI (std)" = colors_gimes["secondary"], 
+                                 "FLI (std)" = colors_gimes["success"])) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  labs(title = "Standardizirani indeksi", x = NULL, y = "Z-score", color = NULL) +
+  labs(title = "Standardizirani indeksi (VAI, UCI, FLI)", x = NULL, y = "Z score", color = NULL) +
   theme(legend.position = "bottom")
 
 p_vol / p_mom / p_mom3 / p_combined
@@ -1245,36 +1192,24 @@ p_vol / p_mom / p_mom3 / p_combined
 
 ## Konstrukcija mjera koncentracije
 
-Koncentracija tema kvantificira stupanj fokusiranosti medijskog izvještavanja na uži ili širi spektar ekonomskih tema.
-
-Herfindahl Hirschman indeks (HHI) se računa kao suma kvadrata udjela svake makro kategorije u ukupnom broju detektiranih pojmova. Udjeli se dobivaju dijeljenjem broja pojmova pojedine kategorije s ukupnim brojem pojmova svih kategorija u danom mjesecu. HHI vrijednosti bliže jedinici indiciraju visoku koncentraciju na manji broj tema, dok vrijednosti bliže nuli sugeriraju disperziranu distribuciju.
+Herfindahl Hirschman indeks (HHI) računa se kao suma kvadrata udjela svake makro kategorije u ukupnom broju detektiranih pojmova. Udjeli se dobivaju dijeljenjem broja pojmova pojedine kategorije s ukupnim brojem pojmova svih kategorija u danom mjesecu. HHI vrijednosti bliže jedinici indiciraju visoku koncentraciju na manji broj tema dok vrijednosti bliže nuli sugeriraju disperziranu distribuciju. Za 12 makro kategorija minimalni HHI iznosi približno 0.083 što odgovara savršeno jednakoj distribuciji.
 
 ::: {.callout-note collapse="true"}
 ## Detaljna metodologija koncentracije tema
 
 **Herfindahl Hirschman Index (HHI):**
 
-Za mjesec $t$ s $K$ makro kategorija, HHI se računa kao:
-
 $$HHI_t = \sum_{k=1}^{K} s_{k,t}^2$$
 
-gdje $s_{k,t} = \frac{n_{k,t}}{\sum_{j=1}^{K} n_{j,t}}$ predstavlja udio kategorije $k$ u ukupnom broju pojmova mjeseca $t$, a $n_{k,t}$ je broj detektiranih pojmova kategorije $k$ u mjesecu $t$.
+gdje $s_{k,t} = \frac{n_{k,t}}{\sum_{j=1}^{K} n_{j,t}}$
 
-**Raspon i interpretacija:**
+**Interpretacija:**
 
-HHI teoretski varira od $\frac{1}{K}$ (savršeno jednaka distribucija) do 1 (potpuna koncentracija na jednu kategoriju). Za 12 makro kategorija, minimalni HHI iznosi približno 0.083.
+HHI > 0.25: Visoka koncentracija, dominacija malog broja tema
 
-- **HHI > 0.25**: Visoka koncentracija, dominacija malog broja tema
-- **HHI 0.15 - 0.25**: Umjerena koncentracija
-- **HHI < 0.15**: Niska koncentracija, diverzificirano pokrivanje
+HHI 0.15 — 0.25: Umjerena koncentracija
 
-**Broj aktivnih tema:**
-
-Komplementarna mjera je jednostavno prebrojavanje kategorija s barem jednim pojavljivanjem. Ovaj indikator pokazuje širinu medijskog pokrivanja neovisno o relativnim udjelima.
-
-**Ekonomska interpretacija:**
-
-Povećana koncentracija može signalizirati dominantnu ekonomsku temu ili događaj koji privlači većinu medijske pažnje. Niska koncentracija sugerira uravnoteženo izvještavanje o različitim aspektima gospodarstva.
+HHI < 0.15: Niska koncentracija, diverzificirano pokrivanje
 
 :::
 
@@ -1283,7 +1218,6 @@ Povećana koncentracija može signalizirati dominantnu ekonomsku temu ili događ
 #| fig-cap: "Koncentracija tema"
 #| fig-height: 8
 
-# Herfindahl indeks koncentracije po mjesecu
 calc_hhi <- function(values) {
   values <- values[values > 0]
   if (length(values) == 0) return(0)
@@ -1295,17 +1229,17 @@ monthly[, topic_hhi := apply(.SD, 1, calc_hhi), .SDcols = macro_cols]
 monthly[, topic_count := rowSums(.SD > 0), .SDcols = macro_cols]
 
 p_hhi <- ggplot(monthly, aes(x = yearmonth, y = topic_hhi)) +
-  geom_line(color = pal$primary, linewidth = 1) +
-  geom_smooth(method = "loess", se = TRUE, color = pal$highlight, span = 0.3) +
+  geom_line(color = colors_gimes["primary"], linewidth = 1) +
+  geom_smooth(method = "loess", se = TRUE, color = colors_gimes["secondary"], span = 0.3) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
   labs(
-    title = "Herfindahl indeks koncentracije tema",
+    title = "Herfindahl Hirschman Index (HHI) koncentracije tema",
     subtitle = "Viši = fokusiranije na manje tema | Niži = disperziranije",
     x = NULL, y = "HHI"
   )
 
 p_count <- ggplot(monthly, aes(x = yearmonth, y = topic_count)) +
-  geom_col(fill = pal$accent, alpha = 0.7) +
+  geom_col(fill = colors_gimes["accent"], alpha = 0.7) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
   labs(title = "Broj aktivnih tema po mjesecu", x = NULL, y = "Broj tema s pojavljivanjem")
 
@@ -1330,7 +1264,6 @@ kable(round(index_only_cor, 3), caption = "Korelacijska matrica indeksa") %>%
 
 wb <- createWorkbook()
 
-# Sheet 1: Glavni indeksi
 addWorksheet(wb, "Indeksi")
 export_indices <- monthly[, .(
   Datum = yearmonth,
@@ -1340,14 +1273,12 @@ export_indices <- monthly[, .(
 )]
 writeData(wb, "Indeksi", export_indices)
 
-# Sheet 2: Sektori
-addWorksheet(wb, "Sektori")
+addWorksheet(wb, "Semanticke_kategorije")
 export_sectors <- monthly[, c("yearmonth", macro_cols), with = FALSE]
 names(export_sectors) <- c("Datum", gsub("macro_", "", macro_cols))
-writeData(wb, "Sektori", export_sectors)
+writeData(wb, "Semanticke_kategorije", export_sectors)
 
-# Sheet 3: Sentiment
-addWorksheet(wb, "Sentiment")
+addWorksheet(wb, "Dinamike")
 export_sentiment <- monthly[, .(
   Datum = yearmonth,
   Pozitivan = sent_positive,
@@ -1359,10 +1290,9 @@ export_sentiment <- monthly[, .(
   Intenzitet_visoki = intensity_high,
   Intenzitet_niski = intensity_low
 )]
-writeData(wb, "Sentiment", export_sentiment)
+writeData(wb, "Dinamike", export_sentiment)
 
-# Sheet 4: Volatilnost
-addWorksheet(wb, "Volatilnost")
+addWorksheet(wb, "Korelacije")
 export_vol <- monthly[, .(
   Datum = yearmonth,
   VAI_volatilnost = VAI_vol,
@@ -1370,12 +1300,11 @@ export_vol <- monthly[, .(
   VAI_momentum_3M = VAI_mom3,
   Topic_HHI = topic_hhi
 )]
-writeData(wb, "Volatilnost", export_vol)
+writeData(wb, "Korelacije", export_vol)
 
-# Stilovi
 header_style <- createStyle(
   textDecoration = "bold",
-  fgFill = "#1a1a2e",
+  fgFill = "#2C3E50",
   fontColour = "white",
   halign = "center"
 )
@@ -1383,19 +1312,20 @@ header_style <- createStyle(
 for (sheet in names(wb)) {
   sheet_data <- switch(sheet,
     "Indeksi" = export_indices,
-    "Sektori" = export_sectors,
-    "Sentiment" = export_sentiment,
-    "Volatilnost" = export_vol
+    "Semanticke_kategorije" = export_sectors,
+    "Dinamike" = export_sentiment,
+    "Korelacije" = export_vol
   )
   ncols <- ncol(sheet_data)
   addStyle(wb, sheet, header_style, rows = 1, cols = 1:ncols, gridExpand = TRUE)
   setColWidths(wb, sheet, cols = 1:ncols, widths = "auto")
 }
 
-output_path <- here("output", "semantic_activity_indices.xlsx")
+output_path <- here("output", "gimes_activity_indices.xlsx")
 dir.create(here("output"), showWarnings = FALSE, recursive = TRUE)
 saveWorkbook(wb, output_path, overwrite = TRUE)
-cat("Excel exportiran:", output_path, "\n")
+
+message("Excel datoteka spremljena: ", output_path)
 ```
 
 # Sažetak
@@ -1416,7 +1346,7 @@ summary_table <- data.table(
   ),
   Vrijednost = c(
     format(nrow(dt), big.mark = ","),
-    paste(format(date_min, "%m/%Y"), "-", format(date_max, "%m/%Y")),
+    paste(format(date_min, "%m/%Y"), "—", format(date_max, "%m/%Y")),
     length(sem_cols),
     length(macro_cols),
     length(index_cols_final),

@@ -182,7 +182,7 @@ Projekt koristi trostupanjski cjevovod:
 
 ---
 
-### 6. Politička polarizacija [izvještaj]()
+### 6. Politička polarizacija [izvještaj](https://raw.githack.com/lusiki/GIMES_HR-inflacija/main/code/03_analysis/report_polarizacija.html)
 
 **Fokus**: Društvene podjele, stranački sukobi, govor mržnje, povijesne traume
 

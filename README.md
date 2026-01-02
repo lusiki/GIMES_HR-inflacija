@@ -1,159 +1,403 @@
-# GIMES: Semantički indeksi hrvatskog gospodarstva i društva
 
-[![Quarto](https://img.shields.io/badge/Quarto-1.4+-blue)](https://quarto.org)
-[![R](https://img.shields.io/badge/R-4.3+-276DC3)](https://www.r-project.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**GIMES** (Gospodarski Indeksi iz Medijskog Sadržaja) je istraživački projekt koji konstruira semantičke indekse ekonomske, društvene i političke aktivnosti analizom hrvatskog medijskog diskursa. Projekt koristi NLP tehnike za ekstrakciju ekonomskih signala iz novinskih članaka.
 
----
 
-## 📊 Izvještaji
+![](ai.jpg)
 
-| Izvještaj | Opis | Ključni indeksi |
-|-----------|------|-----------------|
-| [report_aktivnost.qmd](code/03_analysis/report_aktivnost.qmd) | Agregatna gospodarska aktivnost | VAI, TWI, SCI, SAI, PCI |
-| [report_inflacija.qmd](code/03_analysis/report_inflacija.qmd) | Inflacija i cjenovne dinamike | Inflacijski sentiment, očekivanja |
-| [report_rad.qmd](code/03_analysis/report_rad.qmd) | Tržište rada | Zaposlenost, plaće, nezaposlenost |
-| [report_geo.qmd](code/03_analysis/report_geo.qmd) | Geografska distribucija | Regionalna pokrivenost, prostorni fokus |
-| [report_institucije.qmd](code/03_analysis/report_institucije.qmd) | Institucionalni akteri | HNB, DZS, Vlada, HGK |
+
+
+# GIMES istraživački projekt - pregled
+
+## Sažetak
+
+**GIMES** (Gospodarski (i Društveni) Indeksi iz Medijskog Ekosustava) je sveobuhvatna istraživačka infrastruktura koja konstruira visokofrekventne socioekonomske indikatore za Hrvatsku primjenom semantičke analize na online medijske sadržaje. Projekt transformira nestrukturirani tekst iz približno 25 milijuna medijskih članaka u strukturirane kvantitativne indekse koji prate ekonomske uvjete, političke dinamike, kvalitetu institucija i društveno raspoloženje.
+
+Sustav proizvodi osam tematskih obitelji indeksa koje pokrivaju inflaciju, gospodarsku aktivnost, tržište rada, geopolitički rizik, institucionalno okruženje, političku polarizaciju, društveno povjerenje i sigurnost. Ovi indeksi služe kao alternativne ili komplementarne mjere službenim statistikama, potencijalno nudeći ranije signale i širu pokrivenost društvenih fenomena.
 
 ---
 
-## 🏗️ Struktura projekta
+## Podatkovna infrastruktura
+
+### Izvorna baza podataka
+
+| Komponenta | Specifikacija |
+|-----------|---------------|
+| Sustav baze podataka | DuckDB |
+| Veličina baze | ~25 milijuna članaka |
+| Vremensko pokrivanje | 01.01.2021. do 31.05.2024. |
+| Alokacija memorije | 48GB |
+| Tipovi izvora | Web, društvene mreže, tisak |
+
+### Taksonomija medijskih izvora
+
+Projekt prati 80+ verificiranih hrvatskih news portala organiziranih u pet kategorija:
+
+**Nacionalni mediji** (16 izvora)
+- Glavne platforme: index.hr, jutarnji.hr, vecernji.hr, 24sata.hr, tportal.hr
+- Televizijski: rtl.hr, hrt.hr, dnevnik.hr, n1info.hr
+- Agencije: hina.hr
+- Digitalno native: telegram.hr, nacional.hr, direktno.hr, net.hr, novosti.hr
+
+**Poslovni mediji** (12 izvora)
+- Primarni: poslovni.hr, seebiz.eu, lidermedia.hr, lider.media
+- Specijalizirani: bloombergadria.com, hrportfolio.hr, energypress.net
+- Sektorski specifični: energetika-net.com, jatrgovac.com, gospodarski.hr, privredni.hr, ictbusiness.info
+
+**Regionalni mediji** (50+ izvora)
+- Dalmacija: slobodnadalmacija.hr, dalmatinskiportal.hr, antenazadar.hr, dulist.hr
+- Istra/Kvarner: glasistre.hr, novilist.hr, istra24.hr, rijekadanas.com
+- Slavonija: glas-slavonije.hr, icv.hr, brodportal.hr, epodravina.hr
+- Sjeverna Hrvatska: varazdinske-vijesti.hr, medjimurjepress.net, zagorje.com
+- Središnja Hrvatska: zagreb.info, karlovacki.hr, likaclub.eu
+
+**Specijalizirani mediji**
+- Poljoprivreda: agroklub.com
+- Pravo: legalis.hr, pravosudje.hr
+- Državna uprava: gov.hr, fino.hr
+- Graditeljstvo: gradnja.org, graditeljstvo.hr
+
+**Opinion portali**
+- Analitički orijentirani: 7dnevno.hr, dnevno.hr, otvoreno.hr
+- Komentatorski: politikaplus.com, geopolitika.news, liberoportal.hr
+
+---
+
+## Arhitektura podatkovnog cjevovoda
+
+Projekt koristi trostupanjski cjevovod:
 
 ```
-GIMES/
-├── code/
-│   ├── 01_data_preparation/
-│   ├── 02_preprocessing/
-│   └── 03_analysis/
-│       ├── report_aktivnost.qmd
-│       ├── report_inflacija.qmd
-│       ├── report_rad.qmd
-│       ├── report_geo.qmd
-│       └── report_institucije.qmd
-├── data/
-│   ├── activity_filtered.xlsx
-│   ├── inflation_filtered.xlsx
-│   └── ...
-├── output/
-│   └── semantic_*.xlsx
-└── README.md
-```
-
----
-
-## 🚀 Brzi početak
-
-### Preduvjeti
-
-- R ≥ 4.3
-- Quarto ≥ 1.4
-- Potrebni R paketi:
-
-```r
-install.packages(c(
-  "data.table", "ggplot2", "lubridate", "stringi", 
-  "knitr", "kableExtra", "zoo", "openxlsx", "here",
-  "corrplot", "patchwork", "viridis"
-))
-```
-
-### Renderiranje izvještaja
-
-```bash
-# Pojedinačni izvještaj
-quarto render code/03_analysis/report_aktivnost.qmd
-
-# Svi izvještaji
-quarto render code/03_analysis/
-```
-
----
-
-## 📈 Metodologija
-
-### Semantička taksonomija
-
-Svaki izvještaj koristi hijerarhijsku taksonomiju pojmova s dvije razine:
-- **Makro kategorije**: BDP, industrija, trgovina, turizam, investicije...
-- **Meso kategorije**: specifični pojmovi unutar svake makro kategorije
-
-### Indeksi
-
-| Indeks | Puni naziv | Opis |
-|--------|-----------|------|
-| **VAI** | Volume Activity Index | Ukupan broj ekonomskih pojmova / broj članaka |
-| **TWI** | TF-IDF Weighted Index | TF-IDF ponderirani score |
-| **SCI** | Sectoral Composite Index | Kompozit realnih sektora |
-| **SAI** | Sentiment Adjusted Index | Volume × sentiment ratio |
-| **UCI** | Uncertainty Index | Mjera ekonomske neizvjesnosti |
-| **FLI** | Forward Looking Index | Orijentacija na budućnost |
-| **PCI** | Principal Component Index | PC1 svih makro kategorija |
-
-### Sentiment i neizvjesnost
-
-- **Sentiment leksikon**: pozitivni/negativni ekonomski izrazi
-- **Uncertainty leksikon**: pojmovi neizvjesnosti i rizika
-- **Forward-looking leksikon**: prognoze, očekivanja, planovi
-
----
-
-## 📁 Podaci
-
-### Ulazni podaci (`data/`)
-
-| Datoteka | Opis |
-|----------|------|
-| `activity_filtered.xlsx` | Članci o gospodarskoj aktivnosti |
-| `inflation_filtered.xlsx` | Članci o inflaciji |
-| `labor_filtered.xlsx` | Članci o tržištu rada |
-
-### Izlazni podaci (`output/`)
-
-Svaki izvještaj generira Excel datoteku s više listova:
-- **Indeksi**: mjesečne vrijednosti svih indeksa
-- **Sektori**: disagregirani sektorski podaci
-- **Sentiment**: sentiment komponente
-- **Volatilnost**: momentum i volatilnost indeksa
-
----
-
-## 🔧 Konfiguracija
-
-Izvještaji koriste zajedničku paletu boja i temu:
-
-```r
-pal <- list(
-  dark = "#1a1a2e",
-  primary = "#16213e",
-  accent = "#0f3460",
-  highlight = "#e94560",
-  ...
-)
-theme_set(theme_minimal(base_size = 12))
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         STUPANJ 1: DOHVAT IZ BAZE                           │
+│                                                                             │
+│  ┌─────────────┐    ┌─────────────────┐    ┌─────────────────────────────┐ │
+│  │   DuckDB    │───▶│  Tematski       │───▶│  Sirovi korpus članaka      │ │
+│  │  (25M reda) │    │  regex uzorci   │    │  (RDS datoteke, 100K-500K)  │ │
+│  └─────────────┘    └─────────────────┘    └─────────────────────────────┘ │
+│                                                                             │
+│  Skripte: database_fetch_{tema}.R                                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      STUPANJ 2: VIŠESTRUKO FILTRIRANJE                      │
+│                                                                             │
+│  Filter 1: SOURCE_TYPE == "web"                                             │
+│  Filter 2: FROM ∈ {verificirani news portali}                               │
+│  Filter 3: text_length >= 500 znakova                                       │
+│  Filter 4: TITLE sadrži ključne riječi teme                                 │
+│  Filter 5: FULL_TEXT sadrži core pojmove teme                               │
+│  Filter 6: NOT (sport/zabava) OR ima override pojmove                       │
+│  Filter 7: Verifikacija hrvatskog konteksta                                 │
+│                                                                             │
+│  Skripte: 2nd_filter_{tema}.R                                               │
+│  Output: {tema}_filtered.xlsx (5K-50K članaka po temi)                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   STUPANJ 3: SEMANTIČKA ANALIZA I INDEKSIRANJE              │
+│                                                                             │
+│  ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────────────┐   │
+│  │ Semantička      │   │ Konstrukcija    │   │ Analiza                 │   │
+│  │ taksonomija     │──▶│ indeksa         │──▶│ vremenskih serija       │   │
+│  │ (regex korjeni) │   │ (normalizacija) │   │ (MA, volatilnost, itd.) │   │
+│  └─────────────────┘   └─────────────────┘   └─────────────────────────┘   │
+│                                                                             │
+│  Skripte: report_{tema}.qmd (Quarto)                                        │
+│  Output: HTML izvještaj + Excel indeksi                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 📝 Citiranje
+## Tematske domene
 
-```bibtex
-@misc{gimes2025,
-  author = {GIMES Research},
-  title = {Semantički indeksi hrvatskog gospodarstva},
-  year = {2025},
-  url = {https://github.com/...}
-}
+### 1. Inflacija (inflacija)
+
+**Fokus**: Dinamika potrošačkih cijena, kupovna moć, troškovi života
+
+**Ključni regex uzorci**:
+- Direktni pojmovi: inflacij*, dezinflacij*, hiperinflacij*, stagflacij*
+- Cjenovni indeksi: HICP, indeks potrošačkih cijena
+- Kretanje cijena: poskupljenj*, pojeftinjenj*, rast/pad cijena
+- Troškovi života: troškovi života, životni standard, kupovna moć
+- Specifične cijene: cijena goriva/hrane/struje/plina/benzina
+
+**Validacija**: Križna provjera s Eurostat HICP podacima
+
+---
+
+### 2. Gospodarska aktivnost (aktivnost)
+
+**Fokus**: Performanse realnog sektora, BDP, industrijska proizvodnja, poslovno povjerenje
+
+**Ključni regex uzorci**:
+- BDP: BDP, bruto domaći proizvod
+- Rast/pad: gospodarski rast/pad/oporavak, recesij*
+- Industrija: industrijska proizvodnja, prerađivačka industrija
+- Turizam: turistički promet, broj dolazaka/noćenja
+- Trgovina: vanjska trgovina, izvoz/uvoz, trgovinska bilanca
+- Statistički kontekst: DZS, Eurostat, kvartalni podaci, sezonski prilagođeno
+
+---
+
+### 3. Tržište rada (rad)
+
+**Fokus**: Dinamika zaposlenosti, plaće, radni uvjeti, migracije radne snage
+
+**Ključni regex uzorci**:
+- Zaposlenost: zaposlenost, nezaposlenost, zapošljavanje
+- Plaće: plaća, primanja, prosječna plaća, minimalna plaća
+- Radna snaga: radna snaga, radnici, kadrovi
+- Uvjeti: radni uvjeti, radno vrijeme, kolektivni ugovor
+- Migracije: odljev radnika, iseljavanje, uvoz radne snage
+
+---
+
+### 4. Geopolitički rizik (geopolitika)
+
+**Fokus**: Međunarodna sigurnost, sukobi, savezi, diplomatski odnosi
+
+**Ključni regex uzorci**:
+- NATO/EU sigurnost: NATO članstvo, europska obrana, članak 5
+- Rusija: ruska invazija/agresija, Kremlj, Putin, sankcije
+- Ukrajinski sukob: ukrajinski rat/sukob, Kijev, Donbas, ofenziva
+- Bliski istok: Gaza, Izrael, Hamas, Hezbollah, iranski nuklearni
+- Balkan: Srbija/Kosovo napetost, BiH kriza, Dodik, destabilizacija
+- Hibridne prijetnje: hibridni rat, cyber napad, dezinformacije
+
+---
+
+### 5. Institucionalno okruženje (institucije)
+
+**Fokus**: Percepcija korupcije, učinkovitost pravosuđa, kvaliteta upravljanja
+
+**Ključni regex uzorci**:
+- Korupcija: korupcij*, mito, podmićivanje, USKOK, afera
+- Pravosuđe: sudstvo, pravosuđe, presuda, optužnica, DORH
+- Upravljanje: transparentnost, odgovornost, učinkovitost
+- Vladavina prava: vladavina prava, pravna država, zakonitost
+- Javna uprava: javna uprava, birokracija, birokratski
+
+---
+
+### 6. Politička polarizacija (polarizacija)
+
+**Fokus**: Društvene podjele, stranački sukobi, govor mržnje, povijesne traume
+
+**Ključni regex uzorci**:
+- Ideološki: lijevo/desno, lijevi/desni, ideološk*
+- Stranački sukob: sukob stranaka, međustranački, koalicij*
+- Govor mržnje: govor mržnje, diskriminacija, netrpeljivost
+- Povijesni: ustaš*, partizan*, Jasenovac, Bleiburg, NDH
+- Društvena pitanja: pobačaj, LGBT, tradicija vs. liberalizam
+
+---
+
+### 7. Društveno povjerenje (povjerenje)
+
+**Fokus**: Institucionalno povjerenje, zadovoljstvo životom, društveno raspoloženje, perspektive budućnosti
+
+**Ključni regex uzorci**:
+- Indeksi povjerenja: indeks povjerenja, barometar povjerenja
+- Istraživanja: Eurobarometar, Gallup, anketa povjerenja
+- Institucionalno povjerenje: povjerenje u vladu/sabor/sudstvo/policiju/medije/crkvu
+- Zadovoljstvo životom: zadovoljstvo životom, kvaliteta života
+- Perspektive: optimizam/pesimizam građana, očekivanja za budućnost
+
+---
+
+### 8. Sigurnost (sigurnost)
+
+**Fokus**: Kriminal, nesreće, prirodne katastrofe, hitne službe
+
+**Ključni regex uzorci**:
+- Kriminal: kriminal*, ubojstvo, pljačka, provala, USKOK
+- Promet: prometna nesreća, smrtno stradao, ozlijeđen
+- Požari/katastrofe: požar, poplava, potres, katastrofa
+- Hitne službe: policija, vatrogasci, HGSS, hitna pomoć
+- Institucije: MUP, DORH, sigurnosne službe
+
+---
+
+## Analitička metodologija
+
+### Konstrukcija semantičke taksonomije
+
+Svaka tema koristi hijerarhijsku taksonomiju s:
+
+1. **Makro kategorije** (široke tematske domene)
+2. **Mezo kategorije** (specifične podteme)
+3. **Regex uzorci** (morfološki fleksibilni hrvatski korjeni riječi)
+
+**Morfološko rukovanje**:
+```
+Uzorak: inflacij[aeiou]?[mj]?[ao]?
+Prepoznaje: inflacija, inflacije, inflaciji, inflaciju, inflacijom, inflacijska, inflacijsko
+```
+
+### Konstrukcija indeksa
+
+**Standardni indeksi kroz sve teme**:
+
+| Indeks | Naziv | Opis |
+|-------|------|-------------|
+| VAI/VXI | Volume Activity Index | Gustoća semantičkih pojmova po članku |
+| SCI/SXI | Sectoral Composite Index | Ponderirani prosjek ključnih sektorskih kategorija |
+| SAI | Sentiment Adjusted Index | Volumen moduliran pozitivnim/negativnim tonom |
+| UCI/UXI | Uncertainty Index | Frekvencija pojmova vezanih uz neizvjesnost |
+| FLI/FXI | Forward Looking Index | Frekvencija pojmova očekivanja/prognoza |
+| PCI | Principal Component Index | Prva glavna komponenta svih sektorskih indeksa |
+
+**Formula normalizacije**:
+$$Index_t = \frac{X_t - X_{min}}{X_{max} - X_{min}} \times 100$$
+
+**Izračun sentimenta**:
+$$SR_i = \frac{P_i - N_i}{P_i + N_i}$$
+
+gdje je $P_i$ = broj pozitivnih pojmova, $N_i$ = broj negativnih pojmova
+
+### Analiza vremenskih serija
+
+- **Klizni prosjeci**: 3-mjesečni centrirani MA za izglađivanje trenda
+- **Volatilnost**: Rolling 3-mjesečna standardna devijacija
+- **Momentum**: Mjesečne i tromjesečne promjene
+- **Koncentracija**: Herfindahl-Hirschman indeks za disperziju tema
+
+---
+
+## Struktura izvještaja
+
+Svaki tematski izvještaj slijedi standardiziranu strukturu:
+
+```
+1. Uvod
+   1.1 Motivacija i kontekst
+   1.2 Struktura izvještaja
+
+2. Metodologija identifikacije članaka
+   2.1 Pregled procesa filtriranja (7 koraka filtriranja)
+
+3. Eksploratorni pregled podataka
+   3.1 Osnovne statistike
+   3.2 Distribucija po kategorijama izvora
+   3.3 Top izvori
+   3.4 Vremenska distribucija
+
+4. Semantička taksonomija
+   4.1 Hijerarhijska struktura pojmova
+   4.2 Kategorije i podkategorije
+
+5. Konstrukcija indeksa
+   5.1 [Naziv indeksa] (KRATICA) - za svaki indeks
+   5.2 Opis indeksa (sumarni tablični prikaz)
+
+6. Vizualizacija indeksa
+   6.1 Glavni indeksi
+   6.2 Pojedinačne vizualizacije
+
+7. Sektorska analiza
+   7.1 Dinamika po sektorima
+   7.2 Heatmapa aktivnosti
+   7.3 Korelacijska struktura
+
+8. Sentiment analiza
+
+9. Volatilnost i momentum
+
+10. Koncentracija tema
+
+11. Korelacije između indeksa
+
+12. Export
+
+13. Sažetak
 ```
 
 ---
 
-## 📄 Licenca
+## Izlazni proizvodi
 
-MIT License — vidi [LICENSE](LICENSE)
+### Po temi
+
+| Proizvod | Format | Sadržaj |
+|---------|--------|---------|
+| HTML izvještaj | .html (self-contained) | Potpuna analiza s interaktivnim vizualizacijama |
+| Podaci indeksa | .xlsx | Mjesečni indeksi, kategorije, dinamike, korelacije |
+| Filtrirani korpus | .xlsx/.rds | Čisti dataset članaka za daljnju analizu |
+
+### Struktura Excel radne knjige
+
+| Radni list | Sadržaj |
+|-----------|---------|
+| Indeksi | Svi izračunati indeksi s kliznim prosjecima |
+| Semanticke_kategorije | Mjesečni brojevi za svaku semantičku kategoriju |
+| Dinamike | Mjere volatilnosti i momentuma |
+| Korelacije | Korelacijska matrica indeksa |
 
 ---
 
-*GIMES Research | Semantički indeksi gospodarstva v2.0*
+## Tehnički stack
+
+### Obrada podataka
+- **DuckDB**: Visokoučinkovita analitička baza podataka
+- **data.table**: Brza manipulacija podataka u R-u
+- **stringi**: Unicode-aware obrada stringova s regexom
+
+### Vizualizacija
+- **ggplot2**: Primarno crtanje
+- **plotly**: Interaktivne vizualizacije
+- **patchwork**: Kompozicija grafova
+- **corrplot**: Korelacijske matrice
+
+### Izvještavanje
+- **Quarto**: Framework za literate programming
+- **kableExtra**: Formatirane tablice
+- **openxlsx**: Excel izlaz
+
+### Vremenske serije
+- **zoo**: Rolling funkcije
+- **forecast**: Dekompozicija vremenskih serija
+
+---
+
+## Osiguranje kvalitete
+
+### QC filtriranja članaka
+- Nasumično uzorkovanje naslova (20 članaka nakon filtriranja)
+- Ekstrakcija prepoznatih pojmova i analiza frekvencija
+- Verifikacija distribucije izvora
+
+### Validacija indeksa
+- Korelacija sa službenim statistikama (Eurostat, DZS)
+- Lead/lag analiza za prediktivnu valjanost
+- Provjere koherentnosti među temama
+
+---
+
+## Istraživačke primjene
+
+1. **Ekonomski nowcasting**: Rani indikatori prije službenih objava
+2. **Praćenje politika**: Praćenje javnog diskursa o reformama
+3. **Procjena rizika**: Geopolitički i institucionalni indeksi rizika
+4. **Društvena istraživanja**: Praćenje povjerenja, polarizacije, sentimenta
+5. **Medijske studije**: Analiza ponašanja izvora i koncentracije tema
+
+---
+
+## Metapodaci projekta
+
+| Atribut | Vrijednost |
+|-----------|-------|
+| Organizacija | GIMES Research |
+| Verzija | 2.0 |
+| Jezik | Hrvatski (hr) |
+| Primarni autor | L. Sikic |
+| Framework za izvještaje | Quarto (.qmd) |
+| Programski jezik | R |
+
+---
+
+*Dokument generiran: Siječanj 2026.*
+*GIMES istraživački projekt - pregled v2.0*

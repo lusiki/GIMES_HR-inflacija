@@ -6,7 +6,7 @@
 
 
 
-# GIMES istraživački projekt - pregled
+# GIMES istraživački projekt 
 
 ## Sažetak
 
@@ -62,7 +62,7 @@ Projekt prati 80+ verificiranih hrvatskih news portala organiziranih u pet kateg
 
 ---
 
-## Arhitektura podatkovnog cjevovoda
+## Podatkovni proces 
 
 Projekt koristi trostupanjski cjevovod:
 
@@ -113,7 +113,7 @@ Projekt koristi trostupanjski cjevovod:
 
 ## Tematske domene
 
-### 1. Inflacija (inflacija)
+### 1. Inflacija [izvještaj]()
 
 **Fokus**: Dinamika potrošačkih cijena, kupovna moć, troškovi života
 
@@ -124,11 +124,11 @@ Projekt koristi trostupanjski cjevovod:
 - Troškovi života: troškovi života, životni standard, kupovna moć
 - Specifične cijene: cijena goriva/hrane/struje/plina/benzina
 
-**Validacija**: Križna provjera s Eurostat HICP podacima
+
 
 ---
 
-### 2. Gospodarska aktivnost (aktivnost)
+### 2. Gospodarska aktivnost [izvještaj]()
 
 **Fokus**: Performanse realnog sektora, BDP, industrijska proizvodnja, poslovno povjerenje
 
@@ -142,7 +142,7 @@ Projekt koristi trostupanjski cjevovod:
 
 ---
 
-### 3. Tržište rada (rad)
+### 3. Tržište rada [izvještaj]()
 
 **Fokus**: Dinamika zaposlenosti, plaće, radni uvjeti, migracije radne snage
 
@@ -155,7 +155,7 @@ Projekt koristi trostupanjski cjevovod:
 
 ---
 
-### 4. Geopolitički rizik (geopolitika)
+### 4. Geopolitički rizik [izvještaj]()
 
 **Fokus**: Međunarodna sigurnost, sukobi, savezi, diplomatski odnosi
 
@@ -169,7 +169,7 @@ Projekt koristi trostupanjski cjevovod:
 
 ---
 
-### 5. Institucionalno okruženje (institucije)
+### 5. Institucionalno okruženje [izvještaj]()
 
 **Fokus**: Percepcija korupcije, učinkovitost pravosuđa, kvaliteta upravljanja
 
@@ -182,7 +182,7 @@ Projekt koristi trostupanjski cjevovod:
 
 ---
 
-### 6. Politička polarizacija (polarizacija)
+### 6. Politička polarizacija [izvještaj]()
 
 **Fokus**: Društvene podjele, stranački sukobi, govor mržnje, povijesne traume
 
@@ -195,7 +195,7 @@ Projekt koristi trostupanjski cjevovod:
 
 ---
 
-### 7. Društveno povjerenje (povjerenje)
+### 7. Društveno povjerenje [izvještaj]()
 
 **Fokus**: Institucionalno povjerenje, zadovoljstvo životom, društveno raspoloženje, perspektive budućnosti
 
@@ -208,7 +208,7 @@ Projekt koristi trostupanjski cjevovod:
 
 ---
 
-### 8. Sigurnost (sigurnost)
+### 8. Sigurnost [izvještaj](https://raw.githack.com/lusiki/GIMES_HR-inflacija/main/code/03_analysis/report%20sigurnost.html)
 
 **Fokus**: Kriminal, nesreće, prirodne katastrofe, hitne službe
 

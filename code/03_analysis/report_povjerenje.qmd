@@ -1,0 +1,1442 @@
+---
+title: "Analiza medijske pokrivenosti društvenog povjerenja i optimizma u Hrvatskoj"
+subtitle: "Semantička analiza, konstrukcija indeksa i vremenske dinamike"
+author: "GIMES Research"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 4
+    toc-location: left
+    number-sections: true
+    theme: cosmo
+    code-fold: true
+    code-summary: "Prikaži kod"
+    fig-width: 11
+    fig-height: 7
+    df-print: paged
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+  echo: false
+lang: hr
+---
+
+```{r setup}
+#| label: setup
+#| include: false
+
+library(data.table)
+library(ggplot2)
+library(scales)
+library(lubridate)
+library(stringi)
+library(knitr)
+library(kableExtra)
+library(plotly)
+library(zoo)
+library(openxlsx)
+library(RColorBrewer)
+library(gridExtra)
+library(here)
+library(forecast)
+library(corrplot)
+
+options(scipen = 999)
+theme_set(theme_minimal(base_size = 12))
+
+colors_gimes <- c(
+  "primary" = "#2C3E50",
+  "secondary" = "#27AE60",
+  "accent" = "#3498DB",
+  "warning" = "#E67E22",
+  "danger" = "#C0392B",
+  "light" = "#ECF0F1",
+  "purple" = "#9B59B6",
+  "optimism" = "#2ECC71",
+  "pessimism" = "#E74C3C",
+  "neutral" = "#95A5A6"
+)
+```
+
+# Uvod
+
+U ovom izvještaju se predstavlja sveobuhvatna analiza medijske pokrivenosti društvenog povjerenja i optimizma u Hrvatskoj. Analizom se obuhvaća praćenje institucionalnog povjerenja, zadovoljstva životom, društvenog raspoloženja i perspektiva za budućnost temeljem članaka iz hrvatskih online medija.
+
+## Motivacija i kontekst
+
+Društveno povjerenje i optimizam predstavljaju ključne indikatore socijalne kohezije i kvalitete života u suvremenim društvima. Ovim izvještajem se nastoji odgovoriti na ključna pitanja:
+
+1. Kako se medijsko izvještavanje o povjerenju i optimizmu razvijalo kroz vrijeme?
+2. Koje institucije uživaju najviše/najmanje povjerenja prema medijskom diskursu?
+3. Kako se kreću indikatori zadovoljstva životom i perspektiva za budućnost?
+4. Postoje li sezonski obrasci u izvještavanju o društvenom raspoloženju?
+
+## Struktura izvještaja
+
+U izvještaju se obrađuju sljedeće teme: metodologija identifikacije relevantnih članaka, eksploratorni pregled dataseta, semantička taksonomija pojmova vezanih uz povjerenje i optimizam, konstrukcija specijaliziranih indeksa, vremenske dinamike i međusobne korelacije različitih aspekata društvenog raspoloženja.
+
+```{r load-data}
+#| label: load-data
+
+#dt <- as.data.table(read.xlsx(here("data", "trust_filtered.xlsx")))
+dt <- as.data.table(read.xlsx("C:/Users/lsikic/Desktop/trust_filtered.xlsx"))
+
+if(is.numeric(dt$DATE)) {
+  dt[, DATE := as.Date(DATE, origin = "1899-12-30")]
+} else {
+  dt[, DATE := as.Date(DATE)]
+}
+
+if("text_length" %in% names(dt)) {
+  dt[, text_length := as.numeric(text_length)]
+}
+if("REACH" %in% names(dt)) {
+  dt[, REACH := as.numeric(REACH)]
+}
+if("INTERACTIONS" %in% names(dt)) {
+  dt[, INTERACTIONS := as.numeric(INTERACTIONS)]
+}
+
+dt[, `:=`(
+  date = DATE,
+  year = year(DATE),
+  month = month(DATE),
+  week = isoweek(DATE),
+  yearmonth = floor_date(DATE, "month"),
+  yearweek = floor_date(DATE, "week")
+)]
+```
+
+# Metodologija identifikacije članaka
+
+## Pregled procesa filtriranja
+
+Identifikacija relevantnih članaka se provodi kroz sedmostupanjski proces filtriranja koji kombinira strukturne kriterije, ključne riječi i kontekstualnu validaciju. Proces osigurava da u analizu ulaze samo članci koji su stvarno relevantni za tematiku društvenog povjerenja i optimizma u hrvatskom kontekstu.
+
+::: {.callout-note collapse="true" title="Detaljna metodologija filtriranja"}
+
+**Filter 1: Tip izvora**
+
+Odabiru se samo web izvori kako bi se osigurala konzistentnost formata i dostupnost punog teksta članka.
+
+**Filter 2: Relevantni news portali**
+
+Koristi se lista verificiranih hrvatskih news portala kategoriziranih u pet skupina: nacionalni mediji, poslovni mediji, regionalni mediji, specijalizirani mediji i opinion portali.
+
+**Filter 3: Minimalna duljina teksta**
+
+Članci moraju sadržavati minimalno 500 znakova u punom tekstu.
+
+**Filter 4: Naslov članka**
+
+Naslov članka mora sadržavati pojmove vezane uz povjerenje, optimizam, zadovoljstvo, istraživanja javnog mnijenja ili kvalitetu života.
+
+**Filter 5: Core pojmovi**
+
+Puni tekst članka mora sadržavati core pojmove koji potvrđuju relevantnost za tematiku društvenog povjerenja i optimizma.
+
+**Filter 6: Isključivanje irelevantnog sadržaja**
+
+Isključuju se članci o sportu, zabavi i zadovoljstvu korisnika/kupaca, osim ako sadrže snažne override pojmove.
+
+**Filter 7: Hrvatski kontekst**
+
+Članci moraju sadržavati reference na hrvatsko društvo i institucije.
+
+:::
+
+# Eksploratorni pregled podataka
+
+## Osnovne statistike
+
+U ovom poglavlju se prikazuju osnovne deskriptivne statistike dataseta.
+
+```{r basic-stats}
+#| label: basic-stats
+
+stats_summary <- data.table(
+  Metrika = c(
+    "Ukupan broj članaka",
+    "Vremenski raspon",
+    "Broj dana",
+    "Prosječno članaka dnevno",
+    "Broj izvora (portala)",
+    "Broj kategorija izvora"
+  ),
+  Vrijednost = c(
+    format(nrow(dt), big.mark = ","),
+    paste(format(min(dt$date), "%d.%m.%Y"), "do", format(max(dt$date), "%d.%m.%Y")),
+    as.character(as.numeric(max(dt$date) - min(dt$date))),
+    round(nrow(dt) / as.numeric(max(dt$date) - min(dt$date)), 2),
+    length(unique(dt$FROM)),
+    length(unique(dt$source_category))
+  )
+)
+
+kable(stats_summary, col.names = c("Metrika", "Vrijednost"),
+      caption = "Osnovne statistike dataseta") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Distribucija po kategorijama izvora
+
+```{r source-category}
+#| label: source-category
+#| fig-cap: "Distribucija članaka po kategorijama izvora"
+
+cat_summary <- dt[, .(
+  N = .N,
+  Postotak = round(.N / nrow(dt) * 100, 1)
+), by = source_category][order(-N)]
+
+ggplot(cat_summary, aes(x = reorder(source_category, N), y = N, fill = source_category)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = paste0(format(N, big.mark = ","), "\n(", Postotak, "%)")), 
+            hjust = -0.1, size = 3.5) +
+  coord_flip() +
+  scale_y_continuous(labels = comma, expand = expansion(mult = c(0, 0.2))) +
+  scale_fill_manual(values = c("national" = colors_gimes["primary"],
+                               "business" = colors_gimes["accent"],
+                               "regional" = colors_gimes["secondary"],
+                               "specialized" = colors_gimes["warning"],
+                               "opinion" = colors_gimes["purple"])) +
+  labs(
+    title = "Broj članaka po kategoriji izvora",
+    x = NULL,
+    y = "Broj članaka"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    panel.grid.major.y = element_blank()
+  )
+```
+
+## Top 20 izvora
+
+```{r top-sources}
+#| label: top-sources
+#| fig-cap: "20 najaktivnijih izvora"
+
+top_sources <- dt[, .(N = .N), by = FROM][order(-N)][1:20]
+
+ggplot(top_sources, aes(x = reorder(FROM, N), y = N)) +
+  geom_col(fill = colors_gimes["primary"]) +
+  geom_text(aes(label = format(N, big.mark = ",")), hjust = -0.1, size = 3) +
+  coord_flip() +
+  scale_y_continuous(labels = comma, expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    title = "Top 20 izvora po broju članaka o povjerenju i optimizmu",
+    x = NULL,
+    y = "Broj članaka"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    panel.grid.major.y = element_blank()
+  )
+```
+
+## Distribucija duljine teksta
+
+```{r text-length}
+#| label: text-length
+#| fig-cap: "Distribucija duljine članaka"
+
+if("text_length" %in% names(dt)) {
+  ggplot(dt, aes(x = text_length)) +
+    geom_histogram(bins = 50, fill = colors_gimes["primary"], alpha = 0.8, color = "white") +
+    geom_vline(xintercept = median(dt$text_length, na.rm = TRUE), 
+               color = colors_gimes["danger"], linetype = "dashed", linewidth = 1) +
+    annotate("text", x = median(dt$text_length, na.rm = TRUE) + 500, 
+             y = Inf, vjust = 2, hjust = 0,
+             label = paste("Medijan:", format(round(median(dt$text_length, na.rm = TRUE)), big.mark = ",")),
+             color = colors_gimes["danger"], fontface = "bold") +
+    scale_x_continuous(labels = comma) +
+    scale_y_continuous(labels = comma) +
+    labs(
+      title = "Distribucija duljine članaka",
+      subtitle = "Broj znakova u punom tekstu",
+      x = "Broj znakova",
+      y = "Broj članaka"
+    ) +
+    theme(plot.title = element_text(face = "bold"))
+}
+```
+
+# Vremenska analiza
+
+## Dnevna frekvencija članaka
+
+Na sljedećem grafikonu se prikazuje dnevni broj članaka o povjerenju i optimizmu s kliznim prosjekom.
+
+```{r daily-frequency}
+#| label: daily-frequency
+#| fig-cap: "Dnevni broj članaka o povjerenju i optimizmu"
+#| fig-height: 8
+
+daily <- dt[, .(N = .N), by = date][order(date)]
+daily[, MA7 := frollmean(N, n = 7, align = "center")]
+daily[, MA30 := frollmean(N, n = 30, align = "center")]
+
+ggplot(daily, aes(x = date)) +
+  geom_col(aes(y = N), fill = colors_gimes["light"], alpha = 0.5, width = 1) +
+  geom_line(aes(y = MA7, color = "7-dnevni prosjek"), linewidth = 0.8, na.rm = TRUE) +
+  geom_line(aes(y = MA30, color = "30-dnevni prosjek"), linewidth = 1.2, na.rm = TRUE) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  scale_y_continuous(labels = comma) +
+  scale_color_manual(values = c("7-dnevni prosjek" = colors_gimes["accent"],
+                                "30-dnevni prosjek" = colors_gimes["secondary"])) +
+  labs(
+    title = "Dnevna frekvencija članaka o društvenom povjerenju i optimizmu",
+    subtitle = "Broj članaka po danu sa kliznim prosjekom",
+    x = NULL,
+    y = "Broj članaka",
+    color = "Klizni prosjek"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10),
+    legend.position = "bottom",
+    axis.text.x = element_text(size = 9)
+  )
+```
+
+## Mjesečna dinamika
+
+```{r monthly-trend}
+#| label: monthly-trend
+#| fig-cap: "Mjesečni broj članaka"
+
+monthly <- dt[, .(N = .N), by = yearmonth][order(yearmonth)]
+monthly[, MA3 := frollmean(N, n = 3, align = "center")]
+
+ggplot(monthly, aes(x = yearmonth)) +
+  geom_col(aes(y = N), fill = colors_gimes["primary"], alpha = 0.7, width = 25) +
+  geom_line(aes(y = MA3), color = colors_gimes["secondary"], linewidth = 1.2, na.rm = TRUE) +
+  geom_point(aes(y = MA3), color = colors_gimes["secondary"], size = 2, na.rm = TRUE) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  scale_y_continuous(labels = comma) +
+  labs(
+    title = "Mjesečni broj članaka o povjerenju i optimizmu",
+    subtitle = "Zelena linija = 3-mjesečni klizni prosjek",
+    x = NULL,
+    y = "Broj članaka"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(size = 8)
+  )
+```
+
+## Godišnja usporedba
+
+```{r yearly-comparison}
+#| label: yearly-comparison
+#| fig-cap: "Usporedba mjesečne dinamike po godinama"
+
+yearly_monthly <- dt[, .(N = .N), by = .(year, month)][order(year, month)]
+
+ggplot(yearly_monthly, aes(x = month, y = N, color = factor(year), group = year)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2.5) +
+  scale_x_continuous(breaks = 1:12, labels = c("Sij", "Velj", "Ožu", "Tra", "Svi", "Lip",
+                                                "Srp", "Kol", "Ruj", "Lis", "Stu", "Pro")) +
+  scale_y_continuous(labels = comma) +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "Mjesečna dinamika po godinama",
+    x = "Mjesec",
+    y = "Broj članaka",
+    color = "Godina"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+```
+
+# Semantička taksonomija povjerenja i optimizma
+
+U ovoj sekciji se definira sveobuhvatna semantička taksonomija za analizu društvenog povjerenja i optimizma. Taksonomija se organizira u 12 kategorija koje obuhvaćaju različite aspekte povjerenja, zadovoljstva i društvenog raspoloženja u hrvatskom kontekstu.
+
+## Definicija semantičkog rječnika
+
+Semantički rječnik se temelji na pojmovima identificiranima u procesu filtriranja članaka. Pojmovi se definiraju pomoću korijena riječi (stem) kako bi se osigurala šira morfološka pokrivenost hrvatskog jezika.
+
+::: {.callout-note collapse="true" title="Detaljna metodologija semantičke taksonomije"}
+
+**Princip konstrukcije rječnika:**
+
+1. **Kategorije** predstavljaju konceptualno različite aspekte povjerenja i optimizma
+2. **Regex uzorci** se koriste za fleksibilno prepoznavanje morfoloških varijanti
+3. **Korijenski oblici** osiguravaju prepoznavanje svih padežnih i glagolskih oblika
+
+**Morfološka pokrivenost:**
+
+Za hrvatski jezik koji ima bogatu morfologiju, koriste se:
+
+- Korijenski oblici s opcionalnim nastavcima: `povjerenj[a-zčćžšđ]*` prepoznaje povjerenje, povjerenja, povjerenjem...
+- Alternativni oblici za palatalizaciju: `[sš]`, `[cč]`, `[zž]`
+- Wildcard znakovi: `.{0,15}` dopušta do 15 bilo kojih znakova između riječi
+
+**Formula za brojanje:**
+
+$$
+\text{count}_{c,d} = \sum_{p \in P_c} \text{matches}(p, d)
+$$
+
+gdje je $P_c$ skup regex uzoraka za kategoriju $c$, a $d$ je tekst dokumenta.
+
+:::
+
+```{r semantic-dictionary}
+#| label: semantic-dictionary
+
+# Definicija rječnika pojmova povjerenja i optimizma - STEMMED VERSION
+semantic_terms <- list(
+  
+  # 1. OPĆE POVJERENJE I NEPOVJERENJE
+  povjerenje_opce = c(
+    "povjerenj[a-zčćžšđ]*",                # povjerenje
+    "nepovjerenj[a-zčćžšđ]*",              # nepovjerenje
+    "vjeruj[a-zčćžšđ]*",                   # vjeruju
+    "ne vjeruj[a-zčćžšđ]*",                # ne vjeruju
+    "(rast|pad|gubitak|kriza).{0,10}povjerenj",
+    "me[dđ]uljudsk[a-zčćžšđ]*.{0,10}povjerenj"
+  ),
+  
+  # 2. INSTITUCIONALNO POVJERENJE - VLADA I SABOR
+  povjerenje_vlada = c(
+    "povjerenj[a-zčćžšđ]*.{0,15}vlad[a-zčćžšđ]*",
+    "povjerenj[a-zčćžšđ]*.{0,15}sabor[a-zčćžšđ]*",
+    "povjerenj[a-zčćžšđ]*.{0,15}predsjedni[a-zčćžšđ]*",
+    "vlad[a-zčćžšđ]*.{0,15}povjerenj",
+    "sabor[a-zčćžšđ]*.{0,15}povjerenj",
+    "(ne)?povjerenj[a-zčćžšđ]*.{0,10}politi[cč]ar"
+  ),
+  
+  # 3. INSTITUCIONALNO POVJERENJE - PRAVOSUDDE
+  povjerenje_pravosude = c(
+    "povjerenj[a-zčćžšđ]*.{0,15}(sud|sudstv|pravosud|pravosud)",
+    "povjerenj[a-zčćžšđ]*.{0,15}dr[zž]avn[a-zčćžšđ]*.{0,10}odvjetni[sš]tv",
+    "(sud|pravosud)[a-zčćžšđ]*.{0,15}povjerenj",
+    "povjerenj[a-zčćžšđ]*.{0,15}uskok",
+    "povjerenj[a-zčćžšđ]*.{0,15}pravosu[dđ][a-zčćžšđ]*"
+  ),
+  
+  # 4. INSTITUCIONALNO POVJERENJE - POLICIJA I VOJSKA
+  povjerenje_sigurnost = c(
+    "povjerenj[a-zčćžšđ]*.{0,15}policij[a-zčćžšđ]*",
+    "povjerenj[a-zčćžšđ]*.{0,15}vojsk[a-zčćžšđ]*",
+    "povjerenj[a-zčćžšđ]*.{0,15}oru[zž]an[a-zčćžšđ]*.{0,10}snag",
+    "policij[a-zčćžšđ]*.{0,15}povjerenj",
+    "vojsk[a-zčćžšđ]*.{0,15}povjerenj"
+  ),
+  
+  # 5. INSTITUCIONALNO POVJERENJE - MEDIJI
+  povjerenje_mediji = c(
+    "povjerenj[a-zčćžšđ]*.{0,15}medij[a-zčćžšđ]*",
+    "povjerenj[a-zčćžšđ]*.{0,15}novin[a-zčćžšđ]*",
+    "medij[a-zčćžšđ]*.{0,15}povjerenj",
+    "povjerenj[a-zčćžšđ]*.{0,15}televizij",
+    "(ne)?vjeruj[a-zčćžšđ]*.{0,10}medij"
+  ),
+  
+  # 6. INSTITUCIONALNO POVJERENJE - CRKVA
+  povjerenje_crkva = c(
+    "povjerenj[a-zčćžšđ]*.{0,15}crkv[a-zčćžšđ]*",
+    "crkv[a-zčćžšđ]*.{0,15}povjerenj",
+    "povjerenj[a-zčćžšđ]*.{0,15}(katoličk|vjers)"
+  ),
+  
+  # 7. POVJERENJE U EU
+  povjerenje_eu = c(
+    "povjerenj[a-zčćžšđ]*.{0,15}(eu|europsk[a-zčćžšđ]*\\s+unij)",
+    "(eu|europsk[a-zčćžšđ]*\\s+unij).{0,15}povjerenj",
+    "eurobarometar[a-zčćžšđ]*"
+  ),
+  
+  # 8. OPTIMIZAM I PESIMIZAM
+  optimizam_pesimizam = c(
+    "optimiz[a-zčćžšđ]*",                  # optimizam
+    "pesimiz[a-zčćžšđ]*",                  # pesimizam
+    "optimisti[cč][a-zčćžšđ]*",            # optimističan
+    "pesimisti[cč][a-zčćžšđ]*",            # pesimističan
+    "(gra[dđ]ani|hrvati|stanovni[sš]tvo).{0,15}(optimist|pesimist)"
+  ),
+  
+  # 9. ZADOVOLJSTVO ŽIVOTOM
+  zadovoljstvo_zivotom = c(
+    "zadovoljstv[a-zčćžšđ]*.{0,10}[zž]ivot[a-zčćžšđ]*",
+    "nezadovoljstv[a-zčćžšđ]*.{0,10}[zž]ivot[a-zčćžšđ]*",
+    "kvalitet[a-zčćžšđ]*.{0,10}[zž]ivot[a-zčćžšđ]*",
+    "[zž]ivotn[a-zčćžšđ]*.{0,10}standard[a-zčćžšđ]*",
+    "[zž]ivotn[a-zčćžšđ]*.{0,10}uvjet[a-zčćžšđ]*",
+    "indeks.{0,10}(dobrobiti|blagostanja|sre[cć]e)"
+  ),
+  
+  # 10. DRUŠTVENO RASPOLOŽENJE
+  drustveno_raspolozenje = c(
+    "dru[sš]tven[a-zčćžšđ]*.{0,10}raspolo[zž]enj[a-zčćžšđ]*",
+    "raspolo[zž]enj[a-zčćžšđ]*.{0,10}(gra[dđ]an|javn|stanovni|dru[sš]tv)",
+    "op[cć][a-zčćžšđ]*.{0,10}raspolo[zž]enj",
+    "atmosfer[a-zčćžšđ]*.{0,10}dru[sš]tv"
+  ),
+  
+  # 11. STRAH I ZABRINUTOST
+  strah_zabrinutost = c(
+    "(strah|zabrinutost|tjeskob)[a-zčćžšđ]*.{0,15}(gra[dđ]an|javn|stanovni)",
+    "(gra[dđ]ani|hrvati|stanovni[sš]tvo).{0,15}(strahuj|zabrinut)",
+    "kolektivn[a-zčćžšđ]*.{0,10}(strah|zabrinutost)",
+    "(ve[cć]ina|posto).{0,10}(strahuje|zabrinut)"
+  ),
+  
+  # 12. BUDUĆNOST I PERSPEKTIVE
+  buducnost_perspektive = c(
+    "(o[cč]ekivanj|izgled|perspektiv)[a-zčćžšđ]*.{0,15}(gra[dđ]an|hrvatsk)",
+    "budu[cć]nost[a-zčćžšđ]*.{0,10}(hrvatsk|na[sš])",
+    "(gra[dđ]ani|hrvati).{0,15}(o[cč]ekuj|perspektiv)",
+    "nada.{0,10}(za|u).{0,10}budu[cć]nost"
+  )
+)
+
+term_summary <- data.table(
+  Kategorija = names(semantic_terms),
+  Broj_pojmova = sapply(semantic_terms, length),
+  Primjeri = sapply(semantic_terms, function(x) paste(head(x, 2), collapse = ", "))
+)
+```
+
+<details>
+<summary>**Kliknite za prikaz kompletne tablice semantičkog rječnika**</summary>
+
+```{r semantic-table}
+#| label: semantic-table
+
+# Formatiraj nazive kategorija
+category_display <- c(
+  "povjerenje_opce" = "Opće povjerenje/nepovjerenje",
+  "povjerenje_vlada" = "Povjerenje: Vlada i Sabor",
+  "povjerenje_pravosude" = "Povjerenje: Pravosuđe",
+  "povjerenje_sigurnost" = "Povjerenje: Policija i vojska",
+  "povjerenje_mediji" = "Povjerenje: Mediji",
+  "povjerenje_crkva" = "Povjerenje: Crkva",
+  "povjerenje_eu" = "Povjerenje: EU",
+  "optimizam_pesimizam" = "Optimizam/Pesimizam",
+  "zadovoljstvo_zivotom" = "Zadovoljstvo životom",
+  "drustveno_raspolozenje" = "Društveno raspoloženje",
+  "strah_zabrinutost" = "Strah i zabrinutost",
+  "buducnost_perspektive" = "Budućnost i perspektive"
+)
+
+term_summary[, Kategorija_display := category_display[Kategorija]]
+
+kable(term_summary[, .(Kategorija_display, Broj_pojmova, Primjeri)], 
+      col.names = c("Kategorija", "Broj pojmova", "Primjeri regex uzoraka"),
+      caption = "Pregled rječnika semantičkih pojmova za povjerenje i optimizam") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+</details>
+
+## Brojanje semantičkih pojmova po člancima
+
+Za svaki članak se zbrajaju pojavljivanja pojmova iz svake kategorije. Brojanje se provodi korištenjem regularnih izraza (regex) koji prepoznaju morfološke varijante pojmova.
+
+```{r count-semantic-terms}
+#| label: count-semantic-terms
+
+count_terms <- function(text, patterns) {
+  if(is.na(text) || text == "") return(0)
+  text_lower <- tolower(text)
+  sum(sapply(patterns, function(p) {
+    stri_count_regex(text_lower, p)
+  }))
+}
+
+for(cat_name in names(semantic_terms)) {
+  col_name <- paste0("count_", cat_name)
+  dt[, (col_name) := sapply(FULL_TEXT, count_terms, patterns = semantic_terms[[cat_name]])]
+}
+
+dt[, count_all_semantic := rowSums(.SD), .SDcols = patterns("^count_")]
+```
+
+## Mjesečna agregacija semantičkih pojmova
+
+Podaci se agregiraju na mjesečnoj razini kako bi se omogućila analiza vremenskih trendova za svaku semantičku kategoriju.
+
+```{r monthly-semantic}
+#| label: monthly-semantic
+
+semantic_cols <- names(dt)[grepl("^count_", names(dt))]
+
+monthly_semantic <- dt[, c(
+  .(N = .N),
+  lapply(.SD, sum, na.rm = TRUE),
+  lapply(.SD, mean, na.rm = TRUE) |> setNames(paste0(names(.SD), "_avg"))
+), by = yearmonth, .SDcols = semantic_cols][order(yearmonth)]
+
+monthly_semantic[, total_mentions := count_all_semantic]
+```
+
+## Vizualizacija semantičkih kategorija kroz vrijeme
+
+Na sljedećem grafikonu se prikazuje dinamika svih 12 semantičkih kategorija kroz vrijeme.
+
+```{r semantic-time-series}
+#| label: semantic-time-series
+#| fig-cap: "Dinamika semantičkih kategorija kroz vrijeme"
+#| fig-height: 12
+
+semantic_long <- melt(
+  monthly_semantic[, .(yearmonth, 
+                       count_povjerenje_opce,
+                       count_povjerenje_vlada,
+                       count_povjerenje_pravosude,
+                       count_povjerenje_sigurnost,
+                       count_povjerenje_mediji,
+                       count_povjerenje_crkva,
+                       count_povjerenje_eu,
+                       count_optimizam_pesimizam,
+                       count_zadovoljstvo_zivotom,
+                       count_drustveno_raspolozenje,
+                       count_strah_zabrinutost,
+                       count_buducnost_perspektive)],
+  id.vars = "yearmonth",
+  variable.name = "kategorija",
+  value.name = "broj"
+)
+
+category_labels <- c(
+  "count_povjerenje_opce" = "Opće povjerenje",
+  "count_povjerenje_vlada" = "Povj: Vlada/Sabor",
+  "count_povjerenje_pravosude" = "Povj: Pravosuđe",
+  "count_povjerenje_sigurnost" = "Povj: Policija/Vojska",
+  "count_povjerenje_mediji" = "Povj: Mediji",
+  "count_povjerenje_crkva" = "Povj: Crkva",
+  "count_povjerenje_eu" = "Povj: EU",
+  "count_optimizam_pesimizam" = "Optimizam/Pesimizam",
+  "count_zadovoljstvo_zivotom" = "Zadovoljstvo životom",
+  "count_drustveno_raspolozenje" = "Društveno raspoloženje",
+  "count_strah_zabrinutost" = "Strah/Zabrinutost",
+  "count_buducnost_perspektive" = "Budućnost/Perspektive"
+)
+
+semantic_long[, kategorija_label := category_labels[as.character(kategorija)]]
+
+ggplot(semantic_long, aes(x = yearmonth, y = broj, color = kategorija_label)) +
+  geom_line(linewidth = 1) +
+  facet_wrap(~kategorija_label, ncol = 3, scales = "free_y") +
+  scale_x_date(date_breaks = "6 months", date_labels = "%b %y") +
+  scale_color_brewer(palette = "Set3") +
+  labs(
+    title = "Dinamika semantičkih kategorija povjerenja i optimizma kroz vrijeme",
+    subtitle = "Mjesečni broj spominjanja po kategoriji pojmova",
+    x = NULL,
+    y = "Broj spominjanja",
+    color = NULL
+  ) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+    strip.text = element_text(face = "bold", size = 9)
+  )
+```
+
+# Konstrukcija indeksa povjerenja i optimizma
+
+## Metodologija
+
+U ovoj sekciji se konstruira skup specijaliziranih indeksa za praćenje različitih aspekata društvenog povjerenja i optimizma u hrvatskim medijima. Indeksi se temelje na semantičkim kategorijama i normaliziraju se na skalu 0-100.
+
+### Pregled indeksa
+
+Konstruira se 10 specijaliziranih indeksa:
+
+1. **GTI** (General Trust Index) mjeri opću razinu diskursa o povjerenju
+2. **PTI** (Political Trust Index) prati povjerenje u političke institucije (vlada, sabor)
+3. **JTI** (Judicial Trust Index) mjeri povjerenje u pravosuđe
+4. **STI** (Security Trust Index) prati povjerenje u sigurnosne institucije
+5. **MTI** (Media Trust Index) mjeri povjerenje u medije
+6. **ETI** (EU Trust Index) prati povjerenje u EU
+7. **OPI** (Optimism-Pessimism Index) mjeri balans optimizma i pesimizma
+8. **LSI** (Life Satisfaction Index) prati zadovoljstvo životom
+9. **SMI** (Social Mood Index) mjeri društveno raspoloženje
+10. **CTI** (Composite Trust Index) kompozitni indeks svih kategorija
+
+::: {.callout-note collapse="true" title="Tehnička metodologija konstrukcije indeksa"}
+
+**Formula za pojedinačne indekse:**
+
+$$
+\text{Indeks}_{i,t} = \text{normalize}_{0-100}\left(\frac{\sum_{p \in P_i} \text{count}_{p,t}}{N_t}\right)
+$$
+
+gdje je $P_i$ skup pojmova za kategoriju $i$, $\text{count}_{p,t}$ broj pojavljivanja pojma $p$ u mjesecu $t$, a $N_t$ ukupan broj članaka u mjesecu $t$.
+
+**Normalizacija (min-max):**
+
+$$
+X_{norm} = \frac{X - \min(X)}{\max(X) - \min(X)} \times 100
+$$
+
+**Kompozitni indeks (CTI):**
+
+$$
+\text{CTI}_t = \frac{1}{12} \sum_{i=1}^{12} \text{Indeks}_{i,t}
+$$
+
+**Interpretacija vrijednosti:**
+
+- 0-25: Niska razina diskursa o temi
+- 25-50: Umjerena razina
+- 50-75: Visoka razina
+- 75-100: Vrlo visoka razina (intenzivna medijska pozornost)
+
+:::
+
+```{r index-calculation}
+#| label: index-calculation
+
+index_data <- dt[, .(
+  volume = .N,
+  avg_length = mean(text_length, na.rm = TRUE),
+  avg_reach = if("REACH" %in% names(.SD)) mean(REACH, na.rm = TRUE) else NA_real_,
+  
+  # Semantic categories
+  sem_povjerenje_opce = sum(count_povjerenje_opce, na.rm = TRUE),
+  sem_povjerenje_vlada = sum(count_povjerenje_vlada, na.rm = TRUE),
+  sem_povjerenje_pravosude = sum(count_povjerenje_pravosude, na.rm = TRUE),
+  sem_povjerenje_sigurnost = sum(count_povjerenje_sigurnost, na.rm = TRUE),
+  sem_povjerenje_mediji = sum(count_povjerenje_mediji, na.rm = TRUE),
+  sem_povjerenje_crkva = sum(count_povjerenje_crkva, na.rm = TRUE),
+  sem_povjerenje_eu = sum(count_povjerenje_eu, na.rm = TRUE),
+  sem_optimizam = sum(count_optimizam_pesimizam, na.rm = TRUE),
+  sem_zadovoljstvo = sum(count_zadovoljstvo_zivotom, na.rm = TRUE),
+  sem_raspolozenje = sum(count_drustveno_raspolozenje, na.rm = TRUE),
+  sem_strah = sum(count_strah_zabrinutost, na.rm = TRUE),
+  sem_buducnost = sum(count_buducnost_perspektive, na.rm = TRUE),
+  sem_total = sum(count_all_semantic, na.rm = TRUE)
+), by = yearmonth][order(yearmonth)]
+
+# Normalize function
+normalize <- function(x) {
+  if(all(is.na(x))) return(rep(50, length(x)))
+  min_x <- min(x, na.rm = TRUE)
+  max_x <- max(x, na.rm = TRUE)
+  if(max_x == min_x) return(rep(50, length(x)))
+  (x - min_x) / (max_x - min_x) * 100
+}
+
+# Calculate normalized indices
+index_data[, `:=`(
+  GTI = normalize(sem_povjerenje_opce / volume),      # General Trust Index
+  PTI = normalize(sem_povjerenje_vlada / volume),     # Political Trust Index
+  JTI = normalize(sem_povjerenje_pravosude / volume), # Judicial Trust Index
+  STI = normalize(sem_povjerenje_sigurnost / volume), # Security Trust Index
+  MTI = normalize(sem_povjerenje_mediji / volume),    # Media Trust Index
+  RTI = normalize(sem_povjerenje_crkva / volume),     # Religious Trust Index
+  ETI = normalize(sem_povjerenje_eu / volume),        # EU Trust Index
+  OPI = normalize(sem_optimizam / volume),            # Optimism-Pessimism Index
+  LSI = normalize(sem_zadovoljstvo / volume),         # Life Satisfaction Index
+  SMI = normalize(sem_raspolozenje / volume),         # Social Mood Index
+  FWI = normalize(sem_strah / volume),                # Fear-Worry Index
+  FOI = normalize(sem_buducnost / volume)             # Future Outlook Index
+)]
+
+# Composite Trust Index (simple average of all)
+index_data[, CTI := (GTI + PTI + JTI + STI + MTI + RTI + ETI + OPI + LSI + SMI + FWI + FOI) / 12]
+
+# 3-month moving averages
+index_cols <- c("GTI", "PTI", "JTI", "STI", "MTI", "RTI", "ETI", "OPI", "LSI", "SMI", "FWI", "FOI", "CTI")
+for(col in index_cols) {
+  ma_col <- paste0(col, "_MA3")
+  index_data[, (ma_col) := frollmean(get(col), n = 3, align = "center")]
+}
+
+# Year-over-year changes
+index_data[, CTI_yoy := (CTI / shift(CTI, 12) - 1) * 100]
+```
+
+## Prikaz indeksa kroz vrijeme
+
+### Kompozitni indeks povjerenja (CTI)
+
+Na sljedećem grafikonu se prikazuje Kompozitni indeks povjerenja (CTI) kroz vrijeme. CTI predstavlja prosječnu vrijednost svih 12 specijaliziranih indeksa.
+
+```{r cti-plot}
+#| label: cti-plot
+#| fig-cap: "Kompozitni indeks povjerenja (CTI)"
+#| fig-height: 7
+
+ggplot(index_data, aes(x = yearmonth)) +
+  geom_ribbon(aes(ymin = 0, ymax = CTI), fill = colors_gimes["secondary"], alpha = 0.3) +
+  geom_line(aes(y = CTI), color = colors_gimes["secondary"], linewidth = 0.8, alpha = 0.5) +
+  geom_line(aes(y = CTI_MA3), color = colors_gimes["primary"], linewidth = 1.2, na.rm = TRUE) +
+  geom_point(aes(y = CTI_MA3), color = colors_gimes["primary"], size = 2, na.rm = TRUE) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, 20)) +
+  labs(
+    title = "Kompozitni indeks povjerenja i optimizma (CTI)",
+    subtitle = "Prosjek svih kategorija (0-100) | Tamna linija = 3-mj. klizni prosjek",
+    x = NULL,
+    y = "CTI"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "gray40"),
+    panel.grid.minor = element_blank()
+  )
+```
+
+### Indeksi institucionalnog povjerenja
+
+```{r institutional-trust-plot}
+#| label: institutional-trust-plot
+#| fig-cap: "Indeksi institucionalnog povjerenja kroz vrijeme"
+#| fig-height: 8
+
+inst_indices <- melt(
+  index_data[, .(yearmonth, PTI, JTI, STI, MTI, RTI, ETI)],
+  id.vars = "yearmonth",
+  variable.name = "indeks",
+  value.name = "vrijednost"
+)
+
+inst_labels <- c(
+  "PTI" = "Vlada/Sabor",
+  "JTI" = "Pravosuđe",
+  "STI" = "Policija/Vojska",
+  "MTI" = "Mediji",
+  "RTI" = "Crkva",
+  "ETI" = "EU"
+)
+
+inst_indices[, indeks_label := inst_labels[as.character(indeks)]]
+
+ggplot(inst_indices, aes(x = yearmonth, y = vrijednost, color = indeks_label)) +
+  geom_line(linewidth = 1) +
+  facet_wrap(~indeks_label, ncol = 2, scales = "free_y") +
+  scale_x_date(date_breaks = "6 months", date_labels = "%b %y") +
+  scale_color_brewer(palette = "Set2") +
+  labs(
+    title = "Indeksi institucionalnog povjerenja kroz vrijeme",
+    subtitle = "Normalizirane vrijednosti (0-100)",
+    x = NULL,
+    y = "Vrijednost indeksa",
+    color = NULL
+  ) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+    strip.text = element_text(face = "bold", size = 9)
+  )
+```
+
+### Indeksi raspoloženja i perspektiva
+
+```{r mood-indices-plot}
+#| label: mood-indices-plot
+#| fig-cap: "Indeksi raspoloženja i perspektiva"
+#| fig-height: 8
+
+mood_indices <- melt(
+  index_data[, .(yearmonth, OPI, LSI, SMI, FWI, FOI)],
+  id.vars = "yearmonth",
+  variable.name = "indeks",
+  value.name = "vrijednost"
+)
+
+mood_labels <- c(
+  "OPI" = "Optimizam/Pesimizam",
+  "LSI" = "Zadovoljstvo životom",
+  "SMI" = "Društveno raspoloženje",
+  "FWI" = "Strah/Zabrinutost",
+  "FOI" = "Perspektive budućnosti"
+)
+
+mood_indices[, indeks_label := mood_labels[as.character(indeks)]]
+
+ggplot(mood_indices, aes(x = yearmonth, y = vrijednost, color = indeks_label)) +
+  geom_line(linewidth = 1) +
+  facet_wrap(~indeks_label, ncol = 2, scales = "free_y") +
+  scale_x_date(date_breaks = "6 months", date_labels = "%b %y") +
+  scale_color_manual(values = c(
+    "Optimizam/Pesimizam" = colors_gimes["secondary"],
+    "Zadovoljstvo životom" = colors_gimes["accent"],
+    "Društveno raspoloženje" = colors_gimes["purple"],
+    "Strah/Zabrinutost" = colors_gimes["danger"],
+    "Perspektive budućnosti" = colors_gimes["warning"]
+  )) +
+  labs(
+    title = "Indeksi raspoloženja i perspektiva kroz vrijeme",
+    subtitle = "Normalizirane vrijednosti (0-100)",
+    x = NULL,
+    y = "Vrijednost indeksa",
+    color = NULL
+  ) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+    strip.text = element_text(face = "bold", size = 9)
+  )
+```
+
+## Objašnjenja pojedinačnih indeksa
+
+### GTI (General Trust Index)
+
+Indeks općeg povjerenja (GTI) mjeri intenzitet diskursa o povjerenju i nepovjerenju u općem smislu, bez specifičnog institucionalnog fokusa.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija GTI indeksa"}
+
+**Formula:**
+
+$$
+\text{GTI}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{povjerenje\_opce,t}}{N_t}\right)
+$$
+
+**Uključeni pojmovi:** povjerenje, nepovjerenje, vjeruju/ne vjeruju, rast/pad/gubitak povjerenja, međuljudsko povjerenje
+
+**Interpretacija:** Visoke vrijednosti ukazuju na intenzivan medijski diskurs o temi povjerenja.
+
+:::
+
+### PTI (Political Trust Index)
+
+Indeks političkog povjerenja (PTI) prati intenzitet diskursa o povjerenju u političke institucije (Vlada, Sabor, predsjednik, političari).
+
+::: {.callout-note collapse="true" title="Tehnička metodologija PTI indeksa"}
+
+**Formula:**
+
+$$
+\text{PTI}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{povjerenje\_vlada,t}}{N_t}\right)
+$$
+
+**Uključeni pojmovi:** povjerenje u vladu, povjerenje u Sabor, povjerenje u predsjednika, (ne)povjerenje u političare
+
+**Interpretacija:** Vrhovi ukazuju na periode intenzivnog izvještavanja o povjerenju u političke institucije.
+
+:::
+
+### OPI (Optimism-Pessimism Index)
+
+Indeks optimizma i pesimizma (OPI) mjeri intenzitet diskursa o kolektivnom optimizmu i pesimizmu građana.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija OPI indeksa"}
+
+**Formula:**
+
+$$
+\text{OPI}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{optimizam\_pesimizam,t}}{N_t}\right)
+$$
+
+**Uključeni pojmovi:** optimizam, pesimizam, optimističan/pesimističan, građani optimisti/pesimisti
+
+**Interpretacija:** Visoke vrijednosti signaliziraju intenzivan diskurs o kolektivnom raspoloženju.
+
+:::
+
+### LSI (Life Satisfaction Index)
+
+Indeks zadovoljstva životom (LSI) prati intenzitet diskursa o kvaliteti života i zadovoljstvu životom.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija LSI indeksa"}
+
+**Formula:**
+
+$$
+\text{LSI}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{zadovoljstvo\_zivotom,t}}{N_t}\right)
+$$
+
+**Uključeni pojmovi:** zadovoljstvo životom, kvaliteta života, životni standard, životni uvjeti, indeks dobrobiti/blagostanja/sreće
+
+**Interpretacija:** Visoke vrijednosti ukazuju na pojačan interes za teme kvalitete života.
+
+:::
+
+### FWI (Fear-Worry Index)
+
+Indeks straha i zabrinutosti (FWI) mjeri intenzitet diskursa o kolektivnom strahu i zabrinutosti građana.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija FWI indeksa"}
+
+**Formula:**
+
+$$
+\text{FWI}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{strah\_zabrinutost,t}}{N_t}\right)
+$$
+
+**Uključeni pojmovi:** strah/zabrinutost/tjeskoba građana, građani strahuju/zabrinuti, kolektivni strah
+
+**Interpretacija:** Vrhovi koincidiraju s kriznim razdobljima (pandemija, rat, ekonomska kriza).
+
+:::
+
+## Tablica indeksa
+
+```{r index-table}
+#| label: index-table
+
+index_table <- index_data[, .(
+  Mjesec = format(yearmonth, "%b %Y"),
+  `Broj članaka` = format(volume, big.mark = ","),
+  CTI = round(CTI, 1),
+  GTI = round(GTI, 1),
+  PTI = round(PTI, 1),
+  OPI = round(OPI, 1),
+  LSI = round(LSI, 1),
+  FWI = round(FWI, 1)
+)]
+
+kable(tail(index_table, 12), 
+      caption = "Indeksi povjerenja i optimizma - zadnjih 12 mjeseci",
+      align = c("l", "r", rep("r", 6))) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = colors_gimes["primary"], color = "white")
+```
+
+# Korelacijska analiza
+
+## Korelacijska matrica indeksa
+
+Korelacijska matrica prikazuje međusobne odnose između svih konstruiranih indeksa. Pozitivna korelacija ukazuje na to da dva indeksa tendiraju rasti i padati zajedno.
+
+```{r correlation-matrix}
+#| label: correlation-matrix
+#| fig-cap: "Korelacijska matrica indeksa povjerenja i optimizma"
+#| fig-height: 10
+
+cor_vars <- c("GTI", "PTI", "JTI", "STI", "MTI", "RTI", "ETI", "OPI", "LSI", "SMI", "FWI", "FOI", "CTI")
+cor_data <- index_data[, .SD, .SDcols = cor_vars]
+cor_matrix <- cor(cor_data, use = "pairwise.complete.obs")
+
+corrplot(cor_matrix,
+         method = "color",
+         type = "upper",
+         order = "hclust",
+         tl.col = "black",
+         tl.srt = 45,
+         tl.cex = 0.8,
+         addCoef.col = "black",
+         number.cex = 0.6,
+         col = colorRampPalette(c(colors_gimes["accent"], "white", colors_gimes["secondary"]))(100),
+         title = "Korelacijska matrica indeksa povjerenja i optimizma",
+         mar = c(0, 0, 2, 0))
+```
+
+## Korelacijska tablica
+
+```{r correlation-table}
+#| label: correlation-table
+
+# Korelacije s CTI
+cti_correlations <- data.table(
+  Indeks = cor_vars[cor_vars != "CTI"],
+  Korelacija_s_CTI = sapply(cor_vars[cor_vars != "CTI"], function(x) {
+    round(cor(index_data[[x]], index_data$CTI, use = "complete.obs"), 3)
+  })
+)[order(-Korelacija_s_CTI)]
+
+kable(cti_correlations, 
+      col.names = c("Indeks", "Korelacija s CTI"),
+      caption = "Korelacije pojedinačnih indeksa s Kompozitnim indeksom povjerenja") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+# Dinamike različitih frekvencija
+
+## Sezonska prilagodba
+
+Sezonska prilagodba se provodi korištenjem STL (Seasonal and Trend decomposition using Loess) dekompozicije.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija sezonske prilagodbe"}
+
+**STL dekompozicija:**
+
+$$
+Y_t = T_t + S_t + R_t
+$$
+
+gdje je $T_t$ trend, $S_t$ sezonska komponenta, a $R_t$ ostatak.
+
+**Sezonski prilagođena serija:**
+
+$$
+Y_{SA,t} = T_t + R_t = Y_t - S_t
+$$
+
+:::
+
+```{r seasonal-adjustment}
+#| label: seasonal-adjustment
+
+cti_ts <- ts(index_data$CTI, 
+             start = c(year(min(index_data$yearmonth)), month(min(index_data$yearmonth))),
+             frequency = 12)
+
+stl_cti <- tryCatch({
+  stl(cti_ts, s.window = "periodic", robust = TRUE)
+}, error = function(e) {
+  message("STL dekompozicija nije uspjela: ", e$message)
+  NULL
+})
+
+if(!is.null(stl_cti)) {
+  index_data[, CTI_sa := as.numeric(seasadj(stl_cti))]
+} else {
+  index_data[, CTI_sa := CTI]
+}
+```
+
+## Vizualizacija sezonske komponente
+
+```{r seasonal-decomposition-plot}
+#| label: seasonal-decomposition-plot
+#| fig-cap: "STL dekompozicija Kompozitnog indeksa povjerenja"
+#| fig-height: 10
+
+if(!is.null(stl_cti)) {
+  decomp_df <- data.table(
+    yearmonth = index_data$yearmonth,
+    Original = as.numeric(cti_ts),
+    Trend = as.numeric(stl_cti$time.series[, "trend"]),
+    Sezonska = as.numeric(stl_cti$time.series[, "seasonal"]),
+    Ostatak = as.numeric(stl_cti$time.series[, "remainder"]),
+    SA = as.numeric(seasadj(stl_cti))
+  )
+  
+  decomp_long <- melt(decomp_df, id.vars = "yearmonth", 
+                      variable.name = "komponenta", value.name = "vrijednost")
+  
+  ggplot(decomp_long, aes(x = yearmonth, y = vrijednost)) +
+    geom_line(color = colors_gimes["primary"], linewidth = 0.8) +
+    facet_wrap(~komponenta, ncol = 1, scales = "free_y") +
+    scale_x_date(date_breaks = "6 months", date_labels = "%b %Y") +
+    labs(
+      title = "STL dekompozicija Kompozitnog indeksa povjerenja",
+      subtitle = "Original = Trend + Sezonska + Ostatak | SA = Sezonski prilagođeno",
+      x = NULL,
+      y = "Vrijednost"
+    ) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      strip.text = element_text(face = "bold")
+    )
+}
+```
+
+## Izračun različitih dinamika
+
+```{r calculate-dynamics}
+#| label: calculate-dynamics
+
+annualize_rate <- function(rate, periods_per_year) {
+  ((1 + rate/100)^periods_per_year - 1) * 100
+}
+
+index_data[, `:=`(
+  CTI_mom_sa = (CTI_sa / shift(CTI_sa, 1) - 1) * 100,
+  CTI_yoy_pct = (CTI / shift(CTI, 12) - 1) * 100
+)]
+
+index_data[, CTI_3m_avg := frollmean(CTI_sa, n = 3, align = "right")]
+index_data[, CTI_3m_prev := shift(CTI_3m_avg, 3)]
+index_data[, CTI_3m_ann := annualize_rate((CTI_3m_avg / CTI_3m_prev - 1) * 100, 4)]
+
+index_data[, CTI_6m_avg := frollmean(CTI_sa, n = 6, align = "right")]
+index_data[, CTI_6m_prev := shift(CTI_6m_avg, 6)]
+index_data[, CTI_6m_ann := annualize_rate((CTI_6m_avg / CTI_6m_prev - 1) * 100, 2)]
+```
+
+## Usporedba različitih dinamika
+
+```{r dynamics-comparison}
+#| label: dynamics-comparison
+#| fig-cap: "Usporedba različitih dinamika CTI"
+#| fig-height: 10
+
+dynamics_df <- index_data[, .(
+  yearmonth,
+  `Y/Y (%)` = CTI_yoy_pct,
+  `M/M SA (%)` = CTI_mom_sa,
+  `3M ann. SA (%)` = CTI_3m_ann,
+  `6M ann. SA (%)` = CTI_6m_ann
+)]
+
+dynamics_long <- melt(dynamics_df, id.vars = "yearmonth",
+                      variable.name = "dinamika", value.name = "stopa")
+
+ggplot(dynamics_long[!is.na(stopa)], aes(x = yearmonth, y = stopa, color = dinamika)) +
+  geom_hline(yintercept = 0, color = "gray50", linetype = "dashed") +
+  geom_line(linewidth = 1) +
+  facet_wrap(~dinamika, ncol = 2, scales = "free_y") +
+  scale_x_date(date_breaks = "6 months", date_labels = "%b %y") +
+  scale_color_manual(values = c(
+    "Y/Y (%)" = colors_gimes["primary"],
+    "M/M SA (%)" = colors_gimes["accent"],
+    "3M ann. SA (%)" = colors_gimes["secondary"],
+    "6M ann. SA (%)" = colors_gimes["warning"]
+  )) +
+  labs(
+    title = "Usporedba različitih dinamika Kompozitnog indeksa povjerenja",
+    subtitle = "Y/Y = godina na godinu | M/M SA = mjesec na mjesec sezonski prilagođeno",
+    x = NULL,
+    y = "Promjena (%)",
+    color = NULL
+  ) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "none",
+    strip.text = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+# Heatmapa povjerenja po institucijama
+
+## Mjesečna heatmapa institucionalnog povjerenja
+
+Heatmapa prikazuje intenzitet diskursa o povjerenju u različite institucije kroz vrijeme. Tamnije boje indiciraju viši intenzitet.
+
+```{r heatmap}
+#| label: heatmap
+#| fig-cap: "Heatmapa intenziteta diskursa o institucionalnom povjerenju"
+#| fig-height: 8
+
+# Prepare data for heatmap
+heatmap_data <- index_data[, .(yearmonth, PTI, JTI, STI, MTI, RTI, ETI)]
+
+heatmap_long <- melt(heatmap_data, 
+                     id.vars = "yearmonth",
+                     variable.name = "indeks",
+                     value.name = "vrijednost")
+
+heatmap_long[, indeks_label := inst_labels[as.character(indeks)]]
+
+ggplot(heatmap_long, aes(x = yearmonth, y = reorder(indeks_label, vrijednost), fill = vrijednost)) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "viridis", name = "Intenzitet") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b %y") +
+  labs(
+    title = "Heatmapa intenziteta diskursa o institucionalnom povjerenju",
+    subtitle = "Tamnije boje indiciraju viši intenzitet medijskog diskursa",
+    x = NULL,
+    y = NULL
+  ) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    axis.text.y = element_text(size = 9),
+    legend.position = "right"
+  )
+```
+
+## Heatmapa raspoloženja i perspektiva
+
+```{r heatmap-mood}
+#| label: heatmap-mood
+#| fig-cap: "Heatmapa indeksa raspoloženja i perspektiva"
+#| fig-height: 7
+
+heatmap_mood <- index_data[, .(yearmonth, OPI, LSI, SMI, FWI, FOI)]
+
+heatmap_mood_long <- melt(heatmap_mood, 
+                          id.vars = "yearmonth",
+                          variable.name = "indeks",
+                          value.name = "vrijednost")
+
+heatmap_mood_long[, indeks_label := mood_labels[as.character(indeks)]]
+
+ggplot(heatmap_mood_long, aes(x = yearmonth, y = reorder(indeks_label, vrijednost), fill = vrijednost)) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "plasma", name = "Intenzitet") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b %y") +
+  labs(
+    title = "Heatmapa indeksa raspoloženja i perspektiva",
+    subtitle = "Tamnije boje indiciraju viši intenzitet medijskog diskursa",
+    x = NULL,
+    y = NULL
+  ) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    axis.text.y = element_text(size = 9),
+    legend.position = "right"
+  )
+```
+
+# Zaključci
+
+## Ključni nalazi
+
+```{r summary-findings}
+#| label: summary-findings
+
+peak_month <- index_data[which.max(CTI), yearmonth]
+peak_value <- index_data[which.max(CTI), CTI]
+
+# Find dominant category
+all_indices <- c("GTI", "PTI", "JTI", "STI", "MTI", "RTI", "ETI", "OPI", "LSI", "SMI", "FWI", "FOI")
+index_labels_full <- c(
+  "GTI" = "Opće povjerenje",
+  "PTI" = "Povjerenje: Vlada/Sabor",
+  "JTI" = "Povjerenje: Pravosuđe",
+  "STI" = "Povjerenje: Policija/Vojska",
+  "MTI" = "Povjerenje: Mediji",
+  "RTI" = "Povjerenje: Crkva",
+  "ETI" = "Povjerenje: EU",
+  "OPI" = "Optimizam/Pesimizam",
+  "LSI" = "Zadovoljstvo životom",
+  "SMI" = "Društveno raspoloženje",
+  "FWI" = "Strah/Zabrinutost",
+  "FOI" = "Perspektive budućnosti"
+)
+
+category_means <- colMeans(index_data[, .SD, .SDcols = all_indices], na.rm = TRUE)
+dominant_category <- names(which.max(category_means))
+
+findings <- data.table(
+  Nalaz = c(
+    "Ukupno analiziranih članaka",
+    "Vremenski raspon analize",
+    "Broj izvora",
+    "",
+    "Vrh CTI indeksa",
+    "Vrijednost vrha",
+    "",
+    "Dominantna kategorija",
+    "Prosječna vrijednost",
+    "",
+    "Prosječni CTI",
+    "Standardna devijacija CTI"
+  ),
+  Vrijednost = c(
+    format(nrow(dt), big.mark = ","),
+    paste(format(min(dt$date), "%m/%Y"), "-", format(max(dt$date), "%m/%Y")),
+    as.character(length(unique(dt$FROM))),
+    "",
+    format(peak_month, "%B %Y"),
+    round(peak_value, 1),
+    "",
+    index_labels_full[dominant_category],
+    round(category_means[dominant_category], 1),
+    "",
+    round(mean(index_data$CTI, na.rm = TRUE), 1),
+    round(sd(index_data$CTI, na.rm = TRUE), 1)
+  )
+)
+
+kable(findings, caption = "Sažetak ključnih nalaza analize") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
+  row_spec(c(4, 7, 10), background = colors_gimes["light"])
+```
+
+## Export podataka u Excel
+
+```{r export-excel}
+#| label: export-excel
+
+wb <- createWorkbook()
+
+# Main indices sheet
+export_indices <- index_data[, .(
+  Datum = yearmonth,
+  Godina = year(yearmonth),
+  Mjesec = month(yearmonth),
+  Broj_clanaka = volume,
+  CTI = round(CTI, 2),
+  CTI_MA3 = round(CTI_MA3, 2),
+  GTI = round(GTI, 2),
+  PTI = round(PTI, 2),
+  JTI = round(JTI, 2),
+  STI = round(STI, 2),
+  MTI = round(MTI, 2),
+  RTI = round(RTI, 2),
+  ETI = round(ETI, 2),
+  OPI = round(OPI, 2),
+  LSI = round(LSI, 2),
+  SMI = round(SMI, 2),
+  FWI = round(FWI, 2),
+  FOI = round(FOI, 2)
+)]
+
+addWorksheet(wb, "Indeksi")
+writeData(wb, "Indeksi", export_indices)
+
+header_style <- createStyle(
+  textDecoration = "bold",
+  fgFill = "#2C3E50",
+  fontColour = "white",
+  halign = "center"
+)
+addStyle(wb, "Indeksi", header_style, rows = 1, cols = 1:ncol(export_indices))
+setColWidths(wb, "Indeksi", cols = 1:ncol(export_indices), widths = "auto")
+
+# Semantic categories sheet
+semantic_export <- monthly_semantic[, .(
+  Datum = yearmonth,
+  Broj_clanaka = N,
+  Povjerenje_opce = count_povjerenje_opce,
+  Povjerenje_vlada = count_povjerenje_vlada,
+  Povjerenje_pravosude = count_povjerenje_pravosude,
+  Povjerenje_sigurnost = count_povjerenje_sigurnost,
+  Povjerenje_mediji = count_povjerenje_mediji,
+  Povjerenje_crkva = count_povjerenje_crkva,
+  Povjerenje_EU = count_povjerenje_eu,
+  Optimizam_pesimizam = count_optimizam_pesimizam,
+  Zadovoljstvo_zivotom = count_zadovoljstvo_zivotom,
+  Drustveno_raspolozenje = count_drustveno_raspolozenje,
+  Strah_zabrinutost = count_strah_zabrinutost,
+  Buducnost_perspektive = count_buducnost_perspektive,
+  Ukupno = count_all_semantic
+)]
+
+addWorksheet(wb, "Semanticke_kategorije")
+writeData(wb, "Semanticke_kategorije", semantic_export)
+addStyle(wb, "Semanticke_kategorije", header_style, rows = 1, cols = 1:ncol(semantic_export))
+setColWidths(wb, "Semanticke_kategorije", cols = 1:ncol(semantic_export), widths = "auto")
+
+# Dynamics sheet
+dynamics_export <- index_data[, .(
+  Datum = yearmonth,
+  CTI_original = round(CTI, 2),
+  CTI_SA = round(CTI_sa, 2),
+  CTI_YoY = round(CTI_yoy_pct, 2),
+  CTI_MoM_SA = round(CTI_mom_sa, 2),
+  CTI_3M_ann = round(CTI_3m_ann, 2),
+  CTI_6M_ann = round(CTI_6m_ann, 2)
+)]
+
+addWorksheet(wb, "Dinamike")
+writeData(wb, "Dinamike", dynamics_export)
+addStyle(wb, "Dinamike", header_style, rows = 1, cols = 1:ncol(dynamics_export))
+setColWidths(wb, "Dinamike", cols = 1:ncol(dynamics_export), widths = "auto")
+
+# Correlations sheet
+cor_export <- as.data.table(cor_matrix, keep.rownames = "Indeks")
+
+addWorksheet(wb, "Korelacije")
+writeData(wb, "Korelacije", cor_export)
+addStyle(wb, "Korelacije", header_style, rows = 1, cols = 1:ncol(cor_export))
+setColWidths(wb, "Korelacije", cols = 1:ncol(cor_export), widths = "auto")
+
+# Save
+output_path <- here("output", "trust_optimism_indices.xlsx")
+dir.create(here("output"), showWarnings = FALSE, recursive = TRUE)
+saveWorkbook(wb, output_path, overwrite = TRUE)
+
+message("Excel datoteka spremljena: ", output_path)
+```
+
+---
+
+*Izvještaj generiran: `r Sys.time()`*
+
+*GIMES Research | Analiza medijske pokrivenosti društvenog povjerenja i optimizma v1.0*

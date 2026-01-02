@@ -82,7 +82,7 @@ U izvještaju se obrađuju sljedeće teme: metodologija prikupljanja podataka, e
 #| label: load-data
 
 #dt <- as.data.table(read.xlsx(here("data", "inflacija_filtered.xlsx")))
-dt <- as.data.table(read.xlsx("C:/Users/lsikic/Desktop/institutional_filtered.xlsx"))
+dt <- as.data.table(read.xlsx("C:/Users/lsikic/Desktop/inflacija_filtered.xlsx"))
 
 if(is.numeric(dt$DATE)) {
   dt[, DATE := as.Date(DATE, origin = "1899-12-30")]

@@ -14,7 +14,7 @@ message("Using ", getDTthreads(), " threads")
 # ------------------------------------------------------------------------------
 
 message("\n=== LOADING DATA ===")
-infla_articles <- readRDS("C:/Users/lsikic/Desktop/inflacija_articles.rds")
+#infla_articles <- readRDS("C:/Users/lsikic/Desktop/inflacija_articles.rds")
 
 if(!is.data.table(infla_articles)) {
   setDT(infla_articles)
@@ -398,7 +398,7 @@ dt_excel <- dt_final
 message("Saving all ", format(nrow(dt_excel), big.mark = ","), " rows to Excel...")
 
 # Remove FULL_TEXT for Excel (too large)
-dt_excel[, FULL_TEXT := substr(FULL_TEXT, 1, 500)]
+#dt_excel[, FULL_TEXT := substr(FULL_TEXT, 1, 500)]
 write.xlsx(dt_excel, write_path_xlsx, overwrite = TRUE)
 message("Saved Excel: ", write_path_xlsx)
 

@@ -113,7 +113,7 @@ Projekt koristi trostupanjski cjevovod:
 
 ## Tematske domene
 
-### 1. Inflacija [izvještaj]()
+### 1. Inflacija [izvještaj](https://raw.githack.com/lusiki/GIMES_HR-inflacija/main/code/03_analysis/report_inflacija.html)
 
 **Fokus**: Dinamika potrošačkih cijena, kupovna moć, troškovi života
 

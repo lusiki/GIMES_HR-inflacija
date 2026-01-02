@@ -142,7 +142,7 @@ Projekt koristi trostupanjski cjevovod:
 
 ---
 
-### 3. Tržište rada [izvještaj]()
+### 3. Tržište rada [izvještaj](https://raw.githack.com/lusiki/GIMES_HR-inflacija/main/code/03_analysis/report_rad.html)
 
 **Fokus**: Dinamika zaposlenosti, plaće, radni uvjeti, migracije radne snage
 
@@ -155,7 +155,7 @@ Projekt koristi trostupanjski cjevovod:
 
 ---
 
-### 4. Geopolitički rizik [izvještaj]()
+### 4. Geopolitički rizik [izvještaj](https://raw.githack.com/lusiki/GIMES_HR-inflacija/main/code/03_analysis/report_geo.html)
 
 **Fokus**: Međunarodna sigurnost, sukobi, savezi, diplomatski odnosi
 
@@ -169,7 +169,7 @@ Projekt koristi trostupanjski cjevovod:
 
 ---
 
-### 5. Institucionalno okruženje [izvještaj]()
+### 5. Institucionalno okruženje [izvještaj](https://raw.githack.com/lusiki/GIMES_HR-inflacija/main/code/03_analysis/report_institucije.html)
 
 **Fokus**: Percepcija korupcije, učinkovitost pravosuđa, kvaliteta upravljanja
 

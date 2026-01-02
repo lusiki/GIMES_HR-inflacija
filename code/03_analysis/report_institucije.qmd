@@ -19,6 +19,7 @@ format:
 execute:
   warning: false
   message: false
+  echo: false
 lang: hr
 ---
 
@@ -60,13 +61,13 @@ pal <- list(
 
 # Uvod
 
-Ovaj dokument konstruira semantičke indekse kvalitete institucionalnog okruženja temeljene na analizi medijskog diskursa. Indeksi mjere percepciju korupcije, funkcioniranje pravosuđa, transparentnost vlasti i druge aspekte institucionalnog funkcioniranja.
+U ovom dokumentu se konstruiraju semantički indeksi kvalitete institucionalnog okruženja temeljeni na analizi medijskog diskursa. Indeksima se mjeri percepcija korupcije, funkcioniranje pravosuđa, transparentnost vlasti i drugi aspekti institucionalnog funkcioniranja. Metodologija se temelji na brojanju pojmova iz unaprijed definirane semantičke taksonomije, pri čemu se za svaki članak zbrajaju pojavljivanja relevantnih pojmova, a zatim se provodi mjesečna agregacija i normalizacija.
 
 ```{r load-data}
 #| label: load-data
 
 #dt <- as.data.table(read.xlsx(here("data", "institutions_filtered.xlsx")))
-dt <- as.data.table(read.xlsx("C:/Users/lsikic/Desktop/labor_filtered.xlsx"))
+dt <- as.data.table(read.xlsx("C:/Users/lsikic/Desktop/institutional_filtered.xlsx"))
 
 if (is.numeric(dt$DATE)) {
   dt[, DATE := as.Date(DATE, origin = "1899-12-30")]
@@ -94,6 +95,8 @@ cat("Vremenski raspon:", as.character(date_min), "do", as.character(date_max), "
 ```
 
 # Eksploratorni pregled
+
+U ovom poglavlju se prikazuju osnovne deskriptivne statistike dataseta. Analizom se obuhvaćaju broj članaka, vremenski raspon, distribucija izvora i dinamika objavljivanja kroz vrijeme.
 
 ```{r basic-stats}
 #| label: basic-stats
@@ -176,6 +179,36 @@ ggplot(monthly_count, aes(x = yearmonth)) +
 # Semantička taksonomija
 
 ## Hijerarhijska struktura pojmova
+
+Semantička taksonomija se organizira u hijerarhijsku strukturu s makro kategorijama (npr. korupcija, pravosuđe) i meso kategorijama (npr. opća korupcija, trgovina utjecajem). Za svaku kategoriju se definira skup regularnih izraza (regex pattern) koji obuhvaćaju relevantne pojmove i njihove morfološke varijante.
+
+Pojmovi se definiraju pomoću korijena riječi (stem) kako bi se osigurala šira morfološka pokrivenost. Na primjer, korijen "korupcij" će prepoznati "korupcija", "korupcije", "korupciju", "korupcijom" itd.
+
+::: {.callout-note collapse="true" title="Detaljna metodologija semantičke taksonomije"}
+
+**Princip konstrukcije taksonomije:**
+
+1. **Makro kategorije** predstavljaju široke institucionalne domene (npr. korupcija, pravosuđe, izvršna vlast)
+2. **Meso kategorije** predstavljaju specifičnije podteme unutar makro kategorija
+3. **Regex uzorci** se koriste za fleksibilno prepoznavanje morfoloških varijanti
+
+**Morfološka pokrivenost:**
+
+Za hrvatski jezik koji ima bogatu morfologiju, koriste se:
+
+- Korijenski oblici s opcionalnim nastavcima: `korupcij[aeiou]?` prepoznaje korupcija, korupcije, korupciji, korupciju
+- Alternativni oblici: `(sud|tribunal)` prepoznaje oba sinonima
+- Wildcard znakovi: `.{0,10}` dopušta do 10 bilo kojih znakova između riječi
+
+**Formula za brojanje:**
+
+$$
+\text{count}_{c,d} = \sum_{p \in P_c} \text{matches}(p, d)
+$$
+
+gdje je $P_c$ skup regex uzoraka za kategoriju $c$, a $d$ je tekst dokumenta.
+
+:::
 
 ```{r semantic-taxonomy}
 #| label: semantic-taxonomy
@@ -488,77 +521,128 @@ tax_summary <- rbindlist(lapply(names(institutions_taxonomy), function(macro) {
     )
   }))
 }))
+```
+
+<details>
+<summary>**Kliknite za prikaz kompletne tablice semantičke taksonomije**</summary>
+
+```{r taxonomy-table}
+#| label: taxonomy-table
 
 kable(tax_summary, caption = "Struktura semantičke taksonomije institucija") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
-## Sentiment i kvaliteta leksikoni
+</details>
+
+## Leksikoni sentimenta i kvalitete
+
+Za mjerenje sentimenta i kvalitete institucija koriste se specijalizirani leksikoni. Leksikon sentimenta se dijeli na pozitivne i negativne institucionalne pojmove, dok leksikon kvalitete obuhvaća pojmove koji signaliziraju visoku ili nisku kvalitetu institucionalnog funkcioniranja. Svi pojmovi se definiraju pomoću korijena riječi (stem) kako bi se osigurala šira morfološka pokrivenost.
+
+::: {.callout-note collapse="true" title="Detaljna metodologija leksikona"}
+
+**Pozitivni institucionalni sentiment** se mjeri brojenjem pojmova koji signaliziraju dobro funkcioniranje, transparentnost i integritet. Koriste se korijenski oblici riječi poput `transparent`, `učinkovit`, `pošten`, `reform`, `napred`.
+
+**Negativni institucionalni sentiment** se mjeri brojenjem pojmova koji signaliziraju disfunkcionalnost, korupciju i nepravilnosti. Koriste se korijenski oblici poput `korupcij`, `nezakonit`, `afer`, `skandal`, `zlouporab`.
+
+**Formula za neto sentiment:**
+
+$$
+\text{Sentiment}_{net} = \text{Pozitivno} - \text{Negativno}
+$$
+
+**Formula za omjer sentimenta:**
+
+$$
+\text{Sentiment}_{ratio} = \frac{\text{Pozitivno} - \text{Negativno}}{\text{Pozitivno} + \text{Negativno}}
+$$
+
+Vrijednosti omjera se kreću od -1 (potpuno negativan sentiment) do +1 (potpuno pozitivan sentiment).
+
+**Kvaliteta institucija** se mjeri omjerom pojmova koji signaliziraju visoku kvalitetu (reformirano, modernizirano, učinkovito) i nisku kvalitetu (korumpirano, nefunkcionalno, sporo).
+
+:::
 
 ```{r sentiment-quality-lexicons}
 #| label: sentiment-quality-lexicons
 
-# Institucionalni sentiment leksikon
+# Institucionalni sentiment leksikon - STEMMED VERSION
 institutional_sentiment <- list(
   positive = c(
-    "transparentn", "učinkovit", "efikasan", "pošten", "integritet",
-    "nepristran", "neovis", "profesional", "odgovoran", "zakonit",
-    "pravedno", "demokratsk", "legitim", "reforma", "napredak",
-    "poboljšanj", "unaprijeđen", "oslobođen", "pravomoćno.{0,10}oslobođ",
-    "modernizacij", "digitalizacij", "pojednostavljenj", "ubrzanj",
-    "suradnja", "koordinacij", "uspješn"
+    # Pozitivni pojmovi - korijenski oblici
+    "transparent[aeiou]*", "u[cč]inkovit[aeiou]*", "efikasn[aeiou]*", "po[sš]ten[aeiou]*", 
+    "integritet[aeiou]*", "nepristran[aeiou]*", "neovisn[aeiou]*", "profesional[aeiou]*", 
+    "odgovorn[aeiou]*", "zakonit[aeiou]*", "pravedn[aeiou]*", "demokratsk[aeiou]*", 
+    "legitim[aeiou]*", "reform[aeiou]*", "napred[aeiou]*[ak]*", "pobolj[sš]anj[aeiou]*", 
+    "unaprijed[aeiou]*", "oslobo[dđ]en[aeiou]*", "pravomoćn[aeiou]+.{0,5}oslobo[dđ]",
+    "modernizacij[aeiou]*", "digitalizacij[aeiou]*", "pojednostavljenj[aeiou]*", 
+    "ubrzanj[aeiou]*", "suradnj[aeiou]*", "koordinacij[aeiou]*", "uspje[sš]n[aeiou]*"
   ),
   negative = c(
-    "korupcij", "korumpira", "kriminal", "nezakonit", "protuzakonit",
-    "nelegalan", "nepravilan", "nepošten", "pristran", "zlouporab",
-    "pronevjer", "malverzacij", "afera", "skandal", "optu[zž]",
-    "osu[dđ]", "uhićen", "pritvor", "smijeni", "ostavk",
-    "neučinkovit", "neefikasan", "birokratiziran", "netransparent",
-    "tajn[aeiou]+.{0,10}podatak", "sukob.{0,10}interes",
-    "pogodovanj", "nepotizam", "klijenteliz"
+    # Negativni pojmovi - korijenski oblici
+    "korupcij[aeiou]*", "korumpira[aeiou]*", "kriminal[aeiou]*", "nezakonit[aeiou]*", 
+    "protuzakonit[aeiou]*", "nelegaln[aeiou]*", "nepraviln[aeiou]*", "nepo[sš]ten[aeiou]*", 
+    "pristran[aeiou]*", "zlouporab[aeiou]*", "pronevjer[aeiou]*", "malverzacij[aeiou]*", 
+    "afer[aeiou]*", "skandal[aeiou]*", "optu[zž][aeiou]*", "osu[dđ][aeiou]*", 
+    "uhi[cć]en[aeiou]*", "pritvor[aeiou]*", "smijen[aeiou]*", "ostavk[aeiou]*",
+    "neu[cč]inkovit[aeiou]*", "neefikasn[aeiou]*", "birokratiziran[aeiou]*", 
+    "netransparent[aeiou]*", "tajn[aeiou]+.{0,10}podatak", "sukob.{0,10}interes",
+    "pogodovanj[aeiou]*", "nepotiz[aeiou]*", "klijenteliz[aeiou]*"
   )
 )
 
-# Kvaliteta institucija leksikon
+# Kvaliteta institucija leksikon - STEMMED VERSION
 quality_lexicon <- list(
   high_quality = c(
-    "reformirano", "unaprijeđeno", "modernizirano", "digitalizirano",
-    "transparentno", "učinkovito", "brzo", "profesionalno",
-    "neovisno", "nepristrano", "pravedno", "zakonito",
-    "oslobađajuća", "pravomoćno", "efikasno"
+    # Visoka kvaliteta - korijenski oblici
+    "reformiran[aeiou]*", "unaprijed[aeiou]*[en]*", "moderniziran[aeiou]*", 
+    "digitaliziran[aeiou]*", "transparent[aeiou]*", "u[cč]inkovit[aeiou]*", 
+    "brz[aeiou]*\\b", "profesionaln[aeiou]*", "neovisn[aeiou]*", "nepristran[aeiou]*", 
+    "pravedn[aeiou]*", "zakonit[aeiou]*", "oslobađaju[cć][aeiou]*", "pravomoćn[aeiou]*", 
+    "efikasn[aeiou]*"
   ),
   low_quality = c(
-    "korumpirano", "nefunkcionalno", "neučinkovito", "sporo",
-    "pristrano", "ovisno", "politizirano", "netransparentno",
-    "birokratizirano", "zastarjelo", "neorganizirano",
-    "kaotično", "zakrčeno", "blokirano", "paralizirano"
+    # Niska kvaliteta - korijenski oblici
+    "korumpiran[aeiou]*", "nefunkcion[aeiou]*", "neu[cč]inkovit[aeiou]*", 
+    "spor[aeiou]*\\b", "pristran[aeiou]*", "ovisn[aeiou]*\\b", "politiziran[aeiou]*", 
+    "netransparent[aeiou]*", "birokratiziran[aeiou]*", "zastarjel[aeiou]*", 
+    "neorganiziran[aeiou]*", "kaoti[cč]n[aeiou]*", "zakr[cč]en[aeiou]*", 
+    "blokiran[aeiou]*", "paraliziran[aeiou]*"
   )
 )
 
-# Neizvjesnost leksikon za institucije
+# Neizvjesnost leksikon za institucije - STEMMED VERSION
 institutional_uncertainty <- c(
-  "neizvjesn", "nesigurn", "upitno", "dvojbeno", "neriješeno",
-  "sporno", "kontroverzn", "problematičn", "rizično",
-  "nedefinirano", "nejasno", "nedorečeno", "nepredvidivo",
-  "nestabilno", "promjenjivo", "varira", "oscilira",
-  "možda", "eventualno", "ako", "ukoliko", "ovisi",
-  "čeka se", "odgođeno", "na čekanju", "u proceduri"
+  # Neizvjesnost - korijenski oblici
+  "neizvjesn[aeiou]*", "nesigurn[aeiou]*", "upitn[aeiou]*", "dvojben[aeiou]*", 
+  "nerije[sš]en[aeiou]*", "sporn[aeiou]*", "kontroverzn[aeiou]*", "problemati[cč]n[aeiou]*", 
+  "rizi[cč]n[aeiou]*", "nedefinirani[aeiou]*", "nejasn[aeiou]*", "nedore[cč]en[aeiou]*", 
+  "nepredvidiv[aeiou]*", "nestabiln[aeiou]*", "promjenjiv[aeiou]*", "variraj[aeiou]*", 
+  "osciliraj[aeiou]*",
+  # Uvjetnost
+  "možda", "eventualno", "ako", "ukoliko", "ovisn[aeiou]+.{0,3}o",
+  # Status
+  "[cč]eka.{0,3}se", "odgod[aeiou]*", "na.{0,3}[cč]ekanj", "u.{0,3}procedur"
 )
 
-# Urgentnost i eskalacija leksikon
+# Urgentnost i eskalacija leksikon - STEMMED VERSION
 urgency_lexicon <- c(
-  "hitno", "odmah", "žurno", "kritično", "alarmantno",
-  "dramatično", "ozbiljno", "zabrinjavajuće", "eskalira",
-  "pogoršava", "produbljuje", "intenzivira", "ubrzano",
-  "rekordno", "povijesno", "bez presedana"
+  # Urgentnost - korijenski oblici
+  "hitn[aeiou]*", "odmah", "[zž]urn[aeiou]*", "kriti[cč]n[aeiou]*", "alarmantn[aeiou]*",
+  "dramati[cč]n[aeiou]*", "ozbiljn[aeiou]*", "zabrinjavaju[cć][aeiou]*", "eskalira[aeiou]*",
+  "pogor[sš]ava[aeiou]*", "produblju[aeiou]*", "intenzivira[aeiou]*", "ubrzan[aeiou]*",
+  "rekordn[aeiou]*", "povijesn[aeiou]*", "bez.{0,3}presedan"
 )
 
-# Politička polarizacija leksikon
+# Politička polarizacija leksikon - STEMMED VERSION
 polarization_lexicon <- c(
-  "sukob", "sva[dđ]", "podjela", "polarizacij", "konfrontacij",
-  "napada", "optužuje", "proziva", "kritizira", "osporava",
-  "osudi", "demantira", "pobija", "negira", "odbacuje",
-  "lijevo", "desno", "konzervativ", "liberal", "ekstrem"
+  # Polarizacija - korijenski oblici
+  "sukob[aeiou]*", "sva[dđ][aeiou]*", "podjel[aeiou]*", "polarizacij[aeiou]*", 
+  "konfrontacij[aeiou]*", "napad[aeiou]*", "optu[zž]u[aeiou]*", "proziv[aeiou]*", 
+  "kritizir[aeiou]*", "osporav[aeiou]*", "osudi[aeiou]*", "demantir[aeiou]*", 
+  "pobij[aeiou]*", "negir[aeiou]*", "odbac[aeiou]*",
+  # Politički spektar
+  "lijevo", "desno", "konzervativ[aeiou]*", "liberal[aeiou]*", "ekstrem[aeiou]*"
 )
 
 cat("Definirano", length(institutional_sentiment$positive), "pozitivnih i",
@@ -569,6 +653,8 @@ cat("Definirano", length(polarization_lexicon), "pojmova polarizacije\n")
 ```
 
 ## Brojanje pojmova
+
+Za svaki članak se zbrajaju pojavljivanja pojmova iz svake kategorije. Brojanje se provodi korištenjem regularnih izraza (regex) koji prepoznaju morfološke varijante pojmova. Rezultati se agregiraju na razini makro kategorija zbrajanjem svih pripadajućih meso kategorija.
 
 ```{r count-terms}
 #| label: count-terms
@@ -631,6 +717,8 @@ cat("Izračunato", length(sem_cols), "semantičkih varijabli\n")
 
 ## Mjesečna agregacija
 
+Podaci se agregiraju na mjesečnoj razini kako bi se omogućila analiza vremenskih trendova. Za svaki mjesec se izračunavaju zbroji i prosjeci svih institucionalnih varijabli, te se dodaju pomoćne mjere poput broja članaka i prosječne duljine teksta.
+
 ```{r monthly-aggregation}
 #| label: monthly-aggregation
 
@@ -655,40 +743,11 @@ monthly[, articles_per_source := N / unique_sources]
 cat("Agregirano", nrow(monthly), "mjeseci podataka\n")
 ```
 
-## TF IDF ponderiranje
-
-```{r tfidf-weights}
-#| label: tfidf-weights
-
-# Izračunaj IDF za svaku kategoriju
-calc_idf <- function(monthly_data, col_name) {
-  N <- nrow(monthly_data)
-  df <- sum(monthly_data[[col_name]] > 0, na.rm = TRUE)
-  if (df == 0) return(0)
-  log(N / df)
-}
-
-idf_weights <- sapply(macro_cols, function(col) calc_idf(monthly, col))
-idf_weights <- idf_weights / max(idf_weights, na.rm = TRUE)
-
-# TF-IDF ponderirani score za svaki mjesec
-for (col in macro_cols) {
-  tfidf_col <- paste0(col, "_tfidf")
-  monthly[, (tfidf_col) := (get(col) / total_words) * idf_weights[col] * 1000]
-}
-
-tfidf_cols <- paste0(macro_cols, "_tfidf")
-
-idf_table <- data.table(
-  Kategorija = gsub("macro_", "", macro_cols),
-  IDF_weight = round(idf_weights, 3)
-)[order(-IDF_weight)]
-
-kable(idf_table, caption = "IDF težine po kategorijama") %>%
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
-```
-
 ## Definicija indeksa
+
+U ovom poglavlju se definira deset institucionalnih indeksa. Svaki indeks se konstruira na temelju specifične kombinacije varijabli i normalizira se na skalu 0-100. Normalizacija se provodi korištenjem min-max skaliranja kako bi se omogućila usporedivost indeksa kroz vrijeme.
+
+### Pregled indeksa
 
 ```{r construct-indices}
 #| label: construct-indices
@@ -784,7 +843,9 @@ for (idx in index_cols) {
 cat("Konstruirano", length(index_cols), "indeksa\n")
 ```
 
-## Opis indeksa
+### Detaljni opis indeksa
+
+U nastavku se pruža detaljan opis svakog od deset konstruiranih indeksa. Za svaki indeks se navodi formula, interpretacija vrijednosti i praktična primjena.
 
 ```{r index-descriptions}
 #| label: index-descriptions
@@ -821,9 +882,290 @@ kable(index_desc, caption = "Pregled konstruiranih institucionalnih indeksa") %>
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
+#### Institutional Attention Index (IAI)
+
+IAI mjeri ukupnu razinu medijske pozornosti usmjerene na institucionalne teme. Indeks se izračunava kao zbroj svih institucionalnih pojmova normaliziran po broju članaka u danom mjesecu. Viša vrijednost ukazuje na intenzivnije pokrivanje institucionalnih tema u medijima.
+
+$$
+\text{IAI}_t = \text{normalize}_{0-100}\left(\frac{\sum_{c \in C} \text{count}_{c,t}}{N_t}\right)
+$$
+
+gdje je $C$ skup svih institucionalnih kategorija, $\text{count}_{c,t}$ zbroj pojmova kategorije $c$ u mjesecu $t$, a $N_t$ broj članaka u mjesecu $t$.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija IAI"}
+
+**Normalizacija:** Koristi se min-max skaliranje na raspon 0-100:
+
+$$
+\text{normalize}(x) = \frac{x - \min(x)}{\max(x) - \min(x)} \times 100
+$$
+
+**Interpretacija vrijednosti:**
+
+- 0-25: Niska medijska pozornost na institucije
+- 25-50: Umjerena medijska pozornost
+- 50-75: Povišena medijska pozornost
+- 75-100: Visoka medijska pozornost (razdoblja institucionalnih kriza ili reformi)
+
+**Prednosti i ograničenja:**
+
+- Obuhvaća sve institucionalne teme jednako
+- Normalizacija po broju članaka kontrolira za varijacije u volumenu vijesti
+- Ne razlikuje pozitivno od negativnog izvještavanja o institucijama
+
+:::
+
+#### Corruption Perception Index (CPI)
+
+CPI mjeri intenzitet medijskog izvještavanja o korupciji i povezanim aferama. Indeks se temelji na makro kategoriji korupcija koja obuhvaća opću korupciju, trgovinu utjecajem, pranje novca, organizirani kriminal i afere. Viša vrijednost ukazuje na intenzivnije pokrivanje korupcijskih tema.
+
+$$
+\text{CPI}_t = \text{normalize}_{0-100}\left(\frac{\text{Korupcija}_t}{N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija CPI"}
+
+**Komponente makro kategorije korupcija:**
+
+- Opća korupcija: korupcija, mito, podmićivanje, pronevjera
+- Trgovina utjecajem: zlouporaba položaja, pogodovanje, nepotizam
+- Pranje novca: sumnjive transakcije, offshore, porezna evazija
+- Organizirani kriminal: mafijaške strukture, klanovi
+- Afere: skandali, istrage
+
+**Interpretacija:**
+
+- Visoki CPI može signalizirati izbijanje novih afera ili pojačanu istraživačku aktivnost
+- Padajući CPI može ukazivati na smirivanje situacije ili pomak fokusa na druge teme
+- CPI treba interpretirati zajedno s ISI za razumijevanje tona izvještavanja
+
+:::
+
+#### Judicial Efficiency Index (JEI)
+
+JEI mjeri fokusiranost medijskog diskursa na pravosuđe i sudske procese. Indeks obuhvaća sudove, postupke, presude, optužnice, odvjetništvo i efikasnost pravosuđa. Viša vrijednost ukazuje na veću medijsku pažnju posvećenu pravosudnim temama.
+
+$$
+\text{JEI}_t = \text{normalize}_{0-100}\left(\frac{\text{Pravosuđe}_t}{N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija JEI"}
+
+**Komponente makro kategorije pravosuđe:**
+
+- Sudovi: Vrhovni sud, županijski sudovi, općinski sudovi, Ustavni sud
+- Postupci: kazneni postupci, parnični postupci
+- Presude: pravomoćne i nepravomoćne presude, osude, oslobođenja
+- Optužnice: optuženi, okrivljenici, osumnjičenici
+- Odvjetništvo: DORH, USKOK, tužiteljstvo
+- Efikasnost: trajanje postupaka, zaostali predmeti
+
+**Primjena:**
+
+JEI je koristan za praćenje ciklusa velikih sudskih procesa i reformi pravosuđa. Naglo povećanje JEI često signalizira početak značajnih sudskih postupaka.
+
+:::
+
+#### Governance Quality Index (GQI)
+
+GQI mjeri percepciju kvalitete upravljanja kroz kombinaciju izvršne vlasti, transparentnosti i javne uprave, uz prilagodbu za sentiment. Indeks integrira kvantitativnu mjeru (frekvenciju pojmova) s kvalitativnom mjerom (sentiment omjer).
+
+$$
+\text{GQI}_t = \text{normalize}_{0-100}\left(\frac{\overline{\text{Governance}}_t}{N_t} \times (1 + \text{Sentiment}_{ratio,t})\right)
+$$
+
+gdje je $\overline{\text{Governance}}_t$ prosjek vrijednosti kategorija izvršna_vlast, transparentnost i javna_uprava.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija GQI"}
+
+**Komponente:**
+
+- Izvršna vlast: Vlada, ministarstva, smjene, imenovanja, reforme
+- Transparentnost: javnost rada, informiranje, e-uprava
+- Javna uprava: državni službenici, agencije, birokratizacija
+
+**Sentiment prilagodba:**
+
+Multiplikator $(1 + \text{Sentiment}_{ratio})$ povećava ili smanjuje indeks ovisno o tonu izvještavanja:
+
+- Pozitivan sentiment (ratio > 0): povećava GQI
+- Negativan sentiment (ratio < 0): smanjuje GQI
+- Neutralan sentiment (ratio ≈ 0): bez promjene
+
+**Interpretacija:**
+
+GQI kombinira količinu i kvalitetu izvještavanja, pružajući sveobuhvatniju mjeru percepcije kvalitete upravljanja.
+
+:::
+
+#### Institutional Sentiment Index (ISI)
+
+ISI mjeri neto sentiment o institucijama, odnosno prevladava li pozitivno ili negativno izvještavanje. Indeks se temelji na omjeru pozitivnih i negativnih institucionalnih pojmova, transformiranom na skalu 0-100.
+
+$$
+\text{ISI}_t = \text{normalize}_{0-100}\left(\text{Sentiment}_{ratio,t} + 1\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija ISI"}
+
+**Transformacija:**
+
+Originalni sentiment ratio se kreće od -1 do +1. Dodavanjem 1 dobiva se raspon 0-2, koji se zatim normalizira na 0-100.
+
+**Referentna vrijednost:**
+
+- ISI = 50: neutralan diskurs (jednaka zastupljenost pozitivnih i negativnih pojmova)
+- ISI > 50: dominira pozitivan sentiment o institucijama
+- ISI < 50: dominira negativan sentiment o institucijama
+
+**Primjena:**
+
+ISI je posebno koristan za praćenje promjena u percepciji institucija nakon reformi, afera ili promjena vlasti.
+
+:::
+
+#### Institutional Uncertainty Index (IUI)
+
+IUI mjeri razinu neizvjesnosti i nedorečenosti u institucionalnom diskursu. Indeks se temelji na frekvenciji pojmova koji signaliziraju nesigurnost, uvjetnost i neodređenost. Viša vrijednost ukazuje na veću neizvjesnost oko institucionalnih pitanja.
+
+$$
+\text{IUI}_t = \text{normalize}_{0-100}\left(\frac{\text{Neizvjesnost}_t}{N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija IUI"}
+
+**Kategorije neizvjesnosti:**
+
+1. Eksplicitna neizvjesnost: "neizvjesno", "nesigurno", "upitno"
+2. Neriješenost: "neriješeno", "sporno", "kontroverzno"
+3. Uvjetnost: "možda", "eventualno", "ako", "ukoliko"
+4. Status: "čeka se", "odgođeno", "u proceduri"
+
+**Interpretacija:**
+
+- Visoki IUI prije važnih odluka: neizvjesnost oko ishoda
+- Visoki IUI nakon događaja: nesigurnost oko posljedica
+- Niski IUI: jasna situacija ili konsenzus
+
+:::
+
+#### Political Polarization Index (PPI)
+
+PPI mjeri intenzitet političke polarizacije i sukoba u medijskom prostoru. Indeks obuhvaća pojmove koji signaliziraju konfrontaciju, kritiku i političke podjele. Viša vrijednost ukazuje na polariziranije političko ozračje.
+
+$$
+\text{PPI}_t = \text{normalize}_{0-100}\left(\frac{\text{Polarizacija}_t}{N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija PPI"}
+
+**Kategorije polarizacije:**
+
+1. Konfrontacija: sukob, svađa, podjela, konfrontacija
+2. Kritika: napada, optužuje, proziva, kritizira
+3. Negacija: osporava, demantira, pobija, negira
+4. Politički spektar: lijevo, desno, konzervativno, liberalno, ekstremno
+
+**Interpretacija:**
+
+- Visoki PPI u izbornim razdobljima: pojačana politička konfrontacija
+- Visoki PPI izvan izbora: politička kriza ili duboke podjele
+- Niski PPI: konsenzus ili smirivanje političkih tenzija
+
+:::
+
+#### Institutional Quality Composite (IQC)
+
+IQC je kompozitni indeks koji mjeri omjer pozitivnih i negativnih signala o kvaliteti institucija. Indeks se temelji na leksikonu kvalitete koji razlikuje signale visoke kvalitete (reformirano, učinkovito) od signala niske kvalitete (korumpirano, nefunkcionalno).
+
+$$
+\text{IQC}_t = \text{normalize}_{0-100}\left(\frac{\text{Visoka kvaliteta}_t - \text{Niska kvaliteta}_t}{\text{Visoka kvaliteta}_t + \text{Niska kvaliteta}_t + 1} + 1\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija IQC"}
+
+**Signali visoke kvalitete:**
+
+- Reformirano, modernizirano, digitalizirano
+- Transparentno, učinkovito, brzo
+- Neovisno, nepristrano, pravedno
+
+**Signali niske kvalitete:**
+
+- Korumpirano, nefunkcionalno, sporo
+- Pristrano, politizirano, netransparentno
+- Birokratizirano, blokirano, paralizirano
+
+**Referentna vrijednost:**
+
+- IQC = 50: jednak broj pozitivnih i negativnih signala
+- IQC > 50: prevladavaju pozitivni signali
+- IQC < 50: prevladavaju negativni signali
+
+:::
+
+#### Urgency Index (URI)
+
+URI mjeri urgentnost i intenzitet institucionalnog diskursa. Indeks se temelji na pojmovima koji signaliziraju hitnost, kritičnost i izvanrednost. Viša vrijednost ukazuje na percepciju hitnosti institucionalnih pitanja.
+
+$$
+\text{URI}_t = \text{normalize}_{0-100}\left(\frac{\text{Urgentnost}_t}{N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija URI"}
+
+**Kategorije urgentnosti:**
+
+1. Hitnost: hitno, odmah, žurno
+2. Kritičnost: kritično, alarmantno, dramatično
+3. Eskalacija: eskalira, pogoršava, intenzivira
+4. Izvanrednost: rekordno, povijesno, bez presedana
+
+**Primjena:**
+
+URI je koristan za identifikaciju kriznih razdoblja i situacija koje zahtijevaju hitnu intervenciju.
+
+:::
+
+#### Principal Component Index (PCI)
+
+PCI se konstruira korištenjem analize glavnih komponenata (PCA) na svim makro kategorijama. Prva glavna komponenta se koristi kao sintetički indeks koji maksimalno objašnjava varijabilitet svih institucionalnih tema.
+
+$$
+\text{PCI}_t = \text{normalize}_{0-100}\left(\sum_{i=1}^{k} w_i \cdot z_{i,t}\right)
+$$
+
+gdje su $w_i$ težine iz prve glavne komponente, a $z_{i,t}$ standardizirane vrijednosti makro kategorija.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija PCI"}
+
+**Postupak konstrukcije:**
+
+1. Standardizacija svih makro kategorija (z-score)
+2. Izračun kovarijacijske/korelacijske matrice
+3. Dekompozicija na svojstvene vrijednosti i vektore
+4. Odabir prve glavne komponente
+5. Projekcija podataka na prvu komponentu
+6. Normalizacija na skalu 0-100
+
+**Prednosti:**
+
+- Objektivno ponderiranje tema prema njihovom doprinosu varijabilnosti
+- Reducira dimenzionalnost na jednu sintetičku mjeru
+- Koristi informaciju iz svih tema
+
+**Ograničenja:**
+
+- Interpretacija ovisi o strukturi podataka
+- Težine se mogu mijenjati s novim podacima
+
+:::
+
 # Vizualizacija indeksa
 
 ## Glavni indeksi
+
+Na sljedećim grafikonima se prikazuje dinamika glavnih institucionalnih indeksa kroz vrijeme. IAI, CPI i JEI prikazuju pozornost na institucije, korupciju i pravosuđe, ISI prikazuje sentiment, a IUI prikazuje neizvjesnost.
 
 ```{r main-indices-plot}
 #| label: main-indices-plot
@@ -867,6 +1209,8 @@ p1 / p2 / p3 / p4
 
 ## Governance Quality Index
 
+Na sljedećem grafikonu se prikazuje GQI koji kombinira izvršnu vlast, transparentnost i javnu upravu s prilagodbom za sentiment.
+
 ```{r gqi-plot}
 #| label: gqi-plot
 #| fig-cap: "Governance Quality Index s kliznim prosjekom"
@@ -886,6 +1230,8 @@ if ("GQI" %in% names(monthly)) {
 ```
 
 ## Institutional Quality Composite
+
+IQC prikazuje omjer pozitivnih i negativnih signala o kvaliteti institucija. Vrijednosti iznad 50 ukazuju na prevladavanje pozitivnih signala.
 
 ```{r iqc-plot}
 #| label: iqc-plot
@@ -907,7 +1253,35 @@ ggplot(monthly, aes(x = yearmonth)) +
 
 # Sektorska analiza
 
-## Dinamika po sektorima
+## Konstrukcija sektorskih indeksa
+
+Sektorski indeksi se konstruiraju za svaku od 12 makro kategorija semantičke taksonomije. Za svaki sektor se izračunava mjesečni zbroj pojmova, koji se zatim normalizira na skalu 0-100 korištenjem min-max skaliranja unutar svakog sektora.
+
+Sektorski indeksi omogućuju praćenje dinamike specifičnih institucionalnih tema neovisno o ostalim temama. Na primjer, sektor "pravosuđe" može rasti dok sektor "korupcija" pada, što bi signaliziralo pomak fokusa s afera na sudske procese.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija sektorskih indeksa"}
+
+**Formula za sektorski indeks:**
+
+$$
+\text{Sektor}_{s,t} = \text{normalize}_{0-100}\left(\text{macro}_{s,t}\right)
+$$
+
+gdje je $\text{macro}_{s,t}$ zbroj svih pojmova iz makro kategorije $s$ u mjesecu $t$.
+
+**Napomena o normalizaciji:**
+
+Sektorski indeksi se normaliziraju **unutar svakog sektora**, što znači da vrijednosti različitih sektora nisu izravno usporedive. Vrijednost 80 u sektoru "pravosuđe" ne znači nužno veću aktivnost od vrijednosti 60 u sektoru "korupcija" - znači da je aktivnost u pravosuđu visoka u odnosu na povijesne vrijednosti tog sektora.
+
+**Primjena LOESS izglađivanja:**
+
+Na grafikonima se koristi LOESS (Locally Estimated Scatterplot Smoothing) za prikaz trenda. LOESS koristi lokalno ponderirane regresije za izglađivanje podataka, što omogućuje vizualizaciju srednjoročnih trendova bez pretpostavki o funkcionalnom obliku.
+
+:::
+
+## Dinamika sektorskih indeksa
+
+Na sljedećim grafikonima se prikazuje dinamika 10 ključnih institucionalnih sektora kroz vrijeme. Svaki panel prikazuje normalizirani indeks za jedan sektor, zajedno s LOESS trendom koji izglađuje kratkoročne fluktuacije.
 
 ```{r sector-dynamics}
 #| label: sector-dynamics
@@ -949,6 +1323,34 @@ ggplot(sector_long, aes(x = yearmonth, y = vrijednost_norm)) +
 
 ## Heatmapa sektorske aktivnosti
 
+Heatmapa pruža vizualni pregled intenziteta svih sektorskih indeksa kroz vrijeme na jednom grafikonu. Svaki redak predstavlja jedan sektor, svaki stupac predstavlja jedan mjesec, a boja ćelije predstavlja normalizirani intenzitet aktivnosti u tom sektoru za taj mjesec.
+
+Toplije boje (žuta, narančasta) označavaju veći intenzitet aktivnosti, dok hladnije boje (ljubičasta, tamno plava) označavaju manji intenzitet. Heatmapa omogućuje brzu identifikaciju razdoblja pojačane aktivnosti u specifičnim sektorima i usporedbu dinamike različitih sektora.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija heatmape"}
+
+**Konstrukcija heatmape:**
+
+1. Za svaki sektor se uzimaju mjesečne normalizirane vrijednosti (0-100)
+2. Podaci se organiziraju u matricu (sektori × mjeseci)
+3. Vrijednosti se mapiraju na kontinuiranu skalu boja (plasma paleta)
+
+**Interpretacija:**
+
+- Horizontalni uzorci: promjene aktivnosti jednog sektora kroz vrijeme
+- Vertikalni uzorci: usporedba aktivnosti različitih sektora u istom mjesecu
+- Dijagonalni uzorci: prijenos fokusa s jednog sektora na drugi
+
+**Plasma paleta:**
+
+Koristi se Viridis plasma paleta koja je dizajnirana za:
+
+- Perceptualnu uniformnost (jednake razlike u vrijednosti = jednake vizualne razlike)
+- Pristupačnost za osobe s poremećajima razlikovanja boja
+- Čitljivost i na zaslonu i u ispisu
+
+:::
+
 ```{r sector-heatmap}
 #| label: sector-heatmap
 #| fig-cap: "Heatmapa institucionalne medijske aktivnosti"
@@ -968,6 +1370,8 @@ ggplot(heatmap_data, aes(x = yearmonth, y = sektor, fill = vrijednost_norm)) +
 ```
 
 ## Korelacijska struktura
+
+Korelacijska matrica prikazuje međusobne odnose između svih konstruiranih indeksa i sektorskih kategorija. Pozitivna korelacija (crvena) ukazuje na to da dva indeksa/sektora tendiraju rasti i padati zajedno, dok negativna korelacija (plava) ukazuje na obrnuti odnos.
 
 ```{r correlation-matrix}
 #| label: correlation-matrix
@@ -1000,6 +1404,8 @@ corrplot(cor_matrix,
 # Korupcijski fokus
 
 ## Dinamika korupcijskog diskursa
+
+U ovom poglavlju se detaljnije analizira struktura korupcijskog diskursa. Prikazuje se zastupljenost pojedinih podkategorija korupcije (opća korupcija, trgovina utjecajem, pranje novca, organizirani kriminal, afere) kroz vrijeme.
 
 ```{r corruption-dynamics}
 #| label: corruption-dynamics
@@ -1054,7 +1460,42 @@ if (length(corruption_cols) > 0) {
 
 # Sentiment analiza
 
-## Sentiment komponente
+## Konstrukcija sentiment indeksa
+
+Sentiment analiza u institucionalnom kontekstu se fokusira na razlikovanje pozitivnog i negativnog izvještavanja o institucijama. Za svaki članak se broje pojmovi iz pozitivnog leksikona (transparentnost, učinkovitost, reforma, napredak) i negativnog leksikona (korupcija, skandal, zlouporaba, nefunkcionalnost).
+
+Na temelju ovih brojeva se izračunavaju tri mjere:
+
+1. **Neto sentiment**: razlika između pozitivnih i negativnih pojmova
+2. **Omjer sentimenta**: normalizirana razlika na skalu -1 do +1
+3. **ISI (Institutional Sentiment Index)**: transformirani omjer na skalu 0-100
+
+::: {.callout-note collapse="true" title="Tehnička metodologija sentiment analize"}
+
+**Formule:**
+
+$$
+\text{Neto sentiment}_t = \sum_{p \in P} \text{count}_{p,t} - \sum_{n \in N} \text{count}_{n,t}
+$$
+
+gdje je $P$ skup pozitivnih pojmova, a $N$ skup negativnih pojmova.
+
+$$
+\text{Omjer sentimenta}_t = \frac{\text{Pozitivno}_t - \text{Negativno}_t}{\text{Pozitivno}_t + \text{Negativno}_t}
+$$
+
+**Signali kvalitete:**
+
+Dodatno se mjere signali kvalitete institucija korištenjem leksikona kvalitete:
+
+- Visoka kvaliteta: "reformirano", "modernizirano", "učinkovito", "transparentno"
+- Niska kvaliteta: "korumpirano", "nefunkcionalno", "sporo", "blokirano"
+
+$$
+\text{Kvaliteta}_{net,t} = \text{Visoka}_t - \text{Niska}_t
+$$
+
+:::
 
 ```{r sentiment-components}
 #| label: sentiment-components
@@ -1090,39 +1531,54 @@ p_sent3 <- ggplot(monthly, aes(x = yearmonth)) +
 p_sent1 / p_sent2 / p_sent3
 ```
 
-## Scatter plotovi
-
-```{r scatter-plots}
-#| label: scatter-plots
-#| fig-cap: "Odnosi između ključnih indeksa"
-#| fig-height: 10
-
-p_scatter1 <- ggplot(monthly, aes(x = CPI, y = ISI)) +
-  geom_point(aes(size = N, color = yearmonth), alpha = 0.7) +
-  geom_smooth(method = "lm", se = TRUE, color = pal$primary) +
-  scale_color_viridis_c(option = "viridis",
-                        labels = function(x) format(as.Date(x, origin = "1970-01-01"), "%b %Y")) +
-  labs(
-    title = "Korupcija vs Sentiment",
-    x = "Corruption Perception Index", y = "Institutional Sentiment Index",
-    size = "Broj članaka", color = "Mjesec"
-  )
-
-p_scatter2 <- ggplot(monthly, aes(x = IUI, y = PPI)) +
-  geom_point(aes(size = N, color = yearmonth), alpha = 0.7) +
-  geom_smooth(method = "lm", se = TRUE, color = pal$primary) +
-  scale_color_viridis_c(option = "viridis",
-                        labels = function(x) format(as.Date(x, origin = "1970-01-01"), "%b %Y")) +
-  labs(
-    title = "Neizvjesnost vs Polarizacija",
-    x = "Institutional Uncertainty Index", y = "Political Polarization Index",
-    size = "Broj članaka", color = "Mjesec"
-  )
-
-p_scatter1 / p_scatter2
-```
-
 # Volatilnost i momentum
+
+## Konstrukcija mjera volatilnosti i momenta
+
+Volatilnost i momentum se koriste za procjenu stabilnosti i smjera kretanja institucionalnih indeksa. Volatilnost mjeri koliko indeks varira u kratkom roku, dok momentum mjeri smjer i intenzitet promjene.
+
+**Volatilnost** se izračunava kao standardna devijacija indeksa u kliznom prozoru od 3 mjeseca. Viša volatilnost ukazuje na nestabilniji institucionalni kontekst s čestim promjenama intenziteta.
+
+**Momentum** se izračunava kao razlika između trenutne vrijednosti i vrijednosti u prethodnom razdoblju. Pozitivan momentum ukazuje na rastući trend, dok negativan momentum ukazuje na padajući trend.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija volatilnosti i momenta"}
+
+**Formula za volatilnost (3M rolling SD):**
+
+$$
+\text{Vol}_{t} = \sqrt{\frac{1}{2}\sum_{i=t-2}^{t}(x_i - \bar{x}_{t-2:t})^2}
+$$
+
+gdje je $\bar{x}_{t-2:t}$ prosjek vrijednosti u prozoru od 3 mjeseca.
+
+**Formula za mjesečni momentum:**
+
+$$
+\text{Mom}_{1M,t} = x_t - x_{t-1}
+$$
+
+**Formula za tromjesečni momentum:**
+
+$$
+\text{Mom}_{3M,t} = x_t - x_{t-3}
+$$
+
+**Interpretacija:**
+
+- Visoka volatilnost + pozitivan momentum: brzi rast s nestabilnošću
+- Visoka volatilnost + negativan momentum: brzi pad s nestabilnošću
+- Niska volatilnost + pozitivan momentum: stabilan rast
+- Niska volatilnost + negativan momentum: stabilan pad
+
+**Primjena:**
+
+Kombinacija volatilnosti i momenta omogućuje razlikovanje:
+
+- Strukturnih promjena (trajni pomaci u razini aktivnosti)
+- Cikličkih fluktuacija (povratne oscilacije oko trenda)
+- Šokova (nagle kratkotrajne promjene)
+
+:::
 
 ```{r volatility-momentum}
 #| label: volatility-momentum
@@ -1173,7 +1629,47 @@ p_combined <- ggplot(monthly, aes(x = yearmonth)) +
 p_vol / p_mom / p_mom3 / p_combined
 ```
 
-# Topic concentration
+# Koncentracija tema
+
+## Konstrukcija mjera koncentracije
+
+Koncentracija tema mjeri koliko je medijski diskurs fokusiran na mali broj tema nasuprot disperziji na mnogo tema. Za mjerenje koncentracije koristi se Herfindahl-Hirschman indeks (HHI).
+
+**Visoki HHI** (bliže 1) ukazuje na fokus medija na jednu ili nekoliko dominantnih tema, što je tipično za razdoblja velikih afera ili institucionalnih kriza kada jedna tema dominira.
+
+**Niski HHI** (bliže 0) ukazuje na disperziju pažnje na mnogo tema, što je tipično za mirnija razdoblja ili višestruke istovremene institucionalne teme.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija koncentracije tema"}
+
+**Herfindahl-Hirschman Index (HHI):**
+
+$$
+\text{HHI}_t = \sum_{s=1}^{S} \left(\frac{x_{s,t}}{\sum_{s=1}^{S} x_{s,t}}\right)^2
+$$
+
+gdje je $x_{s,t}$ vrijednost sektora $s$ u mjesecu $t$, a $S$ broj sektora.
+
+**Interpretacija HHI:**
+
+- HHI = 1: potpuna koncentracija (samo jedna tema)
+- HHI = 1/S: potpuna disperzija (sve teme jednako zastupljene)
+- Za S = 12 sektora, minimalni HHI ≈ 0.083
+
+**Broj aktivnih tema:**
+
+Dodatno se prati broj sektora s pozitivnom aktivnošću:
+
+$$
+\text{Aktivne teme}_t = \sum_{s=1}^{S} \mathbb{1}(x_{s,t} > 0)
+$$
+
+**Primjena:**
+
+- Rastući HHI: fokusiranje pažnje na dominantnu temu (npr. velika afera)
+- Padajući HHI: disperzija pažnje ili pojava novih tema
+- Nagli skok HHI: izbijanje nove dominantne institucionalne krize
+
+:::
 
 ```{r topic-concentration}
 #| label: topic-concentration
@@ -1210,6 +1706,8 @@ p_hhi / p_count
 ```
 
 # Korelacije između indeksa
+
+U sljedećoj tablici se prikazuje korelacijska matrica svih konstruiranih institucionalnih indeksa. Korelacije omogućuju razumijevanje međusobnih odnosa između različitih aspekata institucionalnog funkcioniranja.
 
 ```{r index-correlations}
 #| label: index-correlations
@@ -1299,6 +1797,8 @@ cat("Excel exportiran:", output_path, "\n")
 
 # Sažetak
 
+U ovoj analizi je konstruirano deset institucionalnih indeksa temeljenih na semantičkoj analizi medijskog diskursa. Indeksi obuhvaćaju različite aspekte institucionalnog funkcioniranja: ukupnu pozornost (IAI), percepciju korupcije (CPI), pravosuđe (JEI), kvalitetu upravljanja (GQI), sentiment (ISI), neizvjesnost (IUI), polarizaciju (PPI), kompozitnu kvalitetu (IQC), urgentnost (URI) i sintetičku mjeru temeljenu na PCA (PCI).
+
 ```{r summary}
 #| label: summary
 
@@ -1335,4 +1835,4 @@ kable(summary_table, caption = "Sažetak institucionalne analize") %>%
 
 *Izvještaj generiran: `r Sys.time()`*
 
-*GIMES Research | Semantički indeks institucionalnog okruženja v1.0*
+*GIMES Research | Semantički indeks institucionalnog okruženja v2.0*

@@ -59,6 +59,22 @@ colors_gimes <- c(
   "light" = "#ECF0F1",
   "purple" = "#9B59B6"
 )
+
+# Standardizirani vizualni stil za sve grafikone
+theme_gimes <- function() {
+
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14, color = colors_gimes["primary"]),
+    plot.subtitle = element_text(size = 10, color = "gray40"),
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom",
+    axis.text = element_text(size = 9),
+    strip.text = element_text(face = "bold", size = 10)
+  )
+}
+
+theme_set(theme_gimes())
 ```
 
 # Uvod
@@ -81,7 +97,6 @@ U izvještaju se obrađuju sljedeće teme: metodologija prikupljanja podataka, e
 ```{r load-data}
 #| label: load-data
 
-#dt <- as.data.table(read.xlsx(here("data", "inflacija_filtered.xlsx")))
 dt <- as.data.table(read.xlsx("C:/Users/lsikic/Desktop/inflacija_filtered.xlsx"))
 
 if(is.numeric(dt$DATE)) {
@@ -100,21 +115,6 @@ if("INTERACTIONS" %in% names(dt)) {
   dt[, INTERACTIONS := as.numeric(INTERACTIONS)]
 }
 
-# Dodaj AUTO_SENTIMENT ako ne postoji
-if(!"AUTO_SENTIMENT" %in% names(dt)) {
-  dt[, AUTO_SENTIMENT := fcase(
-    stri_detect_regex(tolower(FULL_TEXT), 
-                     "kriz[aeiou]*|katastro[a-zčćžšđ]*|strah[aeiou]*|panik[aeiou]*|pogor[sš]anj[aeiou]*|problem[aeiou]*|visok.{1,20}inflacij", 
-                     case_insensitive = TRUE), -1,
-    stri_detect_regex(tolower(FULL_TEXT), 
-                     "pad.{0,10}inflacij|usporavanj[aeiou]*|stabilizacij[aeiou]*|pobolj[sš]anj[aeiou]*|nizak.{1,20}inflacij", 
-                     case_insensitive = TRUE), 1,
-    default = 0
-  )]
-} else {
-  dt[, AUTO_SENTIMENT := as.numeric(AUTO_SENTIMENT)]
-}
-
 dt[, `:=`(
   date = DATE,
   year = year(DATE),
@@ -131,7 +131,7 @@ dt <- dt[date <= as.Date("2024-11-01")]
 
 ## Pregled procesa filtriranja
 
-Identifikacija relevantnih članaka se provodi kroz šestostupanjski proces filtriranja koji kombinira strukturne kriterije, ključne riječi i kontekstualnu validaciju. Proces osigurava da u analizu ulaze samo članci koji su stvarno relevantni za hrvatsku inflacijsku tematiku.
+Identifikacija relevantnih članaka se provodi kroz šestostupanjski proces filtriranja koji kombinira strukturne kriterije, ključne riječi i kontekstualnu validaciju. Procesom se osigurava da u analizu ulaze samo članci koji su stvarno relevantni za hrvatsku inflacijsku tematiku.
 
 ::: {.callout-note collapse="true" title="Detaljna metodologija filtriranja"}
 
@@ -177,8 +177,7 @@ stats_summary <- data.table(
     "Broj dana",
     "Prosječno članaka dnevno",
     "Broj izvora (portala)",
-    "Broj kategorija izvora",
-    "Članci sa sentimentom"
+    "Broj kategorija izvora"
   ),
   Vrijednost = c(
     format(nrow(dt), big.mark = ","),
@@ -186,8 +185,7 @@ stats_summary <- data.table(
     as.character(as.numeric(max(dt$date) - min(dt$date))),
     round(nrow(dt) / as.numeric(max(dt$date) - min(dt$date)), 1),
     length(unique(dt$FROM)),
-    length(unique(dt$source_category)),
-    format(sum(!is.na(dt$AUTO_SENTIMENT)), big.mark = ",")
+    length(unique(dt$source_category))
   )
 )
 
@@ -222,10 +220,6 @@ ggplot(cat_summary, aes(x = reorder(source_category, N), y = N, fill = source_ca
     title = "Broj članaka po kategoriji izvora",
     x = NULL,
     y = "Broj članaka"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    panel.grid.major.y = element_blank()
   )
 ```
 
@@ -246,10 +240,6 @@ ggplot(top_sources, aes(x = reorder(FROM, N), y = N)) +
     title = "Top 20 izvora po broju članaka o inflaciji",
     x = NULL,
     y = "Broj članaka"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    panel.grid.major.y = element_blank()
   )
 ```
 
@@ -275,8 +265,7 @@ if("text_length" %in% names(dt)) {
       subtitle = "Broj znakova u FULL_TEXT polju",
       x = "Broj znakova",
       y = "Broj članaka"
-    ) +
-    theme(plot.title = element_text(face = "bold"))
+    )
 }
 ```
 
@@ -284,7 +273,7 @@ if("text_length" %in% names(dt)) {
 
 ## Dnevna frekvencija članaka o inflaciji
 
-Na sljedećem grafikonu se prikazuje dnevni broj članaka o inflaciji s kliznim prosjekom. Dnevni broj članaka predstavlja jednostavan ali informativan pokazatelj medijske pozornosti na inflacijske teme.
+Na sljedećem grafikonu se prikazuje dnevni broj članaka o inflaciji s kliznim prosjekom. Dnevnim brojem članaka se predstavlja jednostavan ali informativan pokazatelj medijske pozornosti na inflacijske teme.
 
 ```{r daily-frequency}
 #| label: daily-frequency
@@ -309,12 +298,6 @@ ggplot(daily, aes(x = date)) +
     x = NULL,
     y = "Broj članaka",
     color = "Klizni prosjek"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold", size = 14),
-    plot.subtitle = element_text(size = 10),
-    legend.position = "bottom",
-    axis.text.x = element_text(size = 9)
   )
 ```
 
@@ -327,7 +310,7 @@ ggplot(daily, aes(x = date)) +
 monthly <- dt[, .(N = .N), by = yearmonth][order(yearmonth)]
 monthly[, MA3 := frollmean(N, n = 3, align = "center")]
 
-p_monthly <- ggplot(monthly, aes(x = yearmonth)) +
+ggplot(monthly, aes(x = yearmonth)) +
   geom_col(aes(y = N), fill = colors_gimes["primary"], alpha = 0.7, width = 25) +
   geom_line(aes(y = MA3), color = colors_gimes["secondary"], linewidth = 1.2, na.rm = TRUE) +
   geom_point(aes(y = MA3), color = colors_gimes["secondary"], size = 2, na.rm = TRUE) +
@@ -338,13 +321,7 @@ p_monthly <- ggplot(monthly, aes(x = yearmonth)) +
     subtitle = "Crvena linija = 3-mjesečni klizni prosjek",
     x = NULL,
     y = "Broj članaka"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    axis.text.x = element_text(size = 8)
   )
-
-p_monthly
 ```
 
 ## Tjedna dinamika
@@ -367,10 +344,6 @@ ggplot(weekly, aes(x = yearweek)) +
     subtitle = "Crvena linija = 4-tjedni klizni prosjek",
     x = NULL,
     y = "Broj članaka"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    axis.text.x = element_text(angle = 45, hjust = 1)
   )
 ```
 
@@ -395,10 +368,6 @@ ggplot(yearly_monthly, aes(x = month, y = N, color = factor(year), group = year)
     x = "Mjesec",
     y = "Broj članaka",
     color = "Godina"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    legend.position = "bottom"
   )
 ```
 
@@ -415,7 +384,7 @@ dt[, weekday := factor(weekday_num, levels = 1:7, labels = weekday_labels)]
 weekday_summary <- dt[, .(N = .N), by = weekday][order(weekday)]
 
 ggplot(weekday_summary, aes(x = weekday, y = N)) +
-  geom_col(fill = "gray40", show.legend = FALSE) +
+  geom_col(fill = colors_gimes["primary"], show.legend = FALSE) +
   geom_text(aes(label = format(N, big.mark = ",")), vjust = -0.5, size = 3.5) +
   scale_y_continuous(labels = comma, expand = expansion(mult = c(0, 0.1))) +
   labs(
@@ -423,245 +392,223 @@ ggplot(weekday_summary, aes(x = weekday, y = N)) +
     x = NULL,
     y = "Broj članaka"
   ) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    axis.text.x = element_text(angle = 45, hjust = 1)
-  )
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
-## Sentiment kroz vrijeme
+# Analiza sentimenta
+
+U ovoj sekciji se prikazuje metodologija i rezultati analize sentimenta članaka o inflaciji. Sentimentom se mjeri ton i emocionalnost izvještavanja o inflacijskim temama.
+
+## Konstrukcija sentiment leksikona
+
+Analiza sentimenta se provodi korištenjem prilagođenog leksikona za hrvatski jezik. Leksikonom se koriste korijenski oblici riječi (stemovi) kako bi se osigurala šira morfološka pokrivenost svih padežnih i glagolskih oblika.
+
+Sentiment svakoga članka se određuje na temelju prisutnosti pozitivnih i negativnih pojmova u tekstu. Za svaki članak se broje pojavljivanja pojmova iz obje kategorije, a konačni sentiment se izračunava kao razlika normaliziranih vrijednosti.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija sentiment analize"}
+
+**Princip konstrukcije leksikona:**
+
+Leksikonom se koriste korijenski oblici riječi (stemovi) s regex uzorcima koji prepoznaju sve morfološke varijante. Na primjer, uzorak `kriz[aeiou]*` prepoznaje: kriza, krize, krizi, krizom, krizu itd.
+
+**Formula za izračun sentimenta:**
+
+Za svaki članak $d$ se izračunava sentiment prema formuli:
+
+$$
+S_d = \frac{P_d - N_d}{P_d + N_d + 1}
+$$
+
+gdje je:
+
+- $P_d$ = broj pozitivnih pojmova u članku
+- $N_d$ = broj negativnih pojmova u članku
+- Dodavanje 1 u nazivniku sprječava dijeljenje s nulom
+
+**Interpretacija vrijednosti:**
+
+- $S_d < -0.2$: Negativan sentiment (članak fokusiran na probleme, krize, negativne aspekte)
+- $-0.2 \leq S_d \leq 0.2$: Neutralan sentiment
+- $S_d > 0.2$: Pozitivan sentiment (članak fokusiran na poboljšanja, stabilizaciju)
+
+**Mjesečna agregacija:**
+
+Mjesečni sentiment se izračunava kao ponderirani prosjek:
+
+$$
+\bar{S}_m = \frac{\sum_{d \in m} S_d \cdot w_d}{\sum_{d \in m} w_d}
+$$
+
+gdje je $w_d$ težina članka (može biti duljina teksta ili reach).
+
+:::
+
+```{r sentiment-lexicon}
+#| label: sentiment-lexicon
+
+# Sentiment leksikon s korijenskim oblicima (stemovima) za morfološku pokrivenost
+sentiment_negative_stems <- c(
+  # Krizni pojmovi
+  "kriz[aeiou]*",              # kriza, krize, krizom...
+  "katastro[a-zčćžšđ]*",       # katastrofa, katastrofalan...
+  "kolaps[a-zčćžšđ]*",         # kolaps, kolapsirati...
+  "propast[a-zčćžšđ]*",        # propast, propadanje...
+  
+  # Strah i panika
+  "strah[aeiou]*",             # strah, strahovi, strahovanja...
+  "panik[aeiou]*",             # panika, paničan...
+  "zabrinut[a-zčćžšđ]*",       # zabrinutost, zabrinjavajuće...
+  "neizvjesn[a-zčćžšđ]*",      # neizvjesnost, neizvjestan...
+  
+  # Pogoršanje
+  "pogor[sš]anj[aeiou]*",      # pogoršanje, pogoršanja...
+  "pad[aeiou]*",               # pad, padanje...
+  "smanjenj[aeiou]*",          # smanjenje, smanjenja...
+  "gubit[a-zčćžšđ]*",          # gubitak, gubici...
+  
+  # Problemi
+  "problem[aeiou]*",           # problem, problemi...
+  "pote[sš]ko[cć][aeiou]*",    # poteškoća, poteškoće...
+  "nedostat[a-zčćžšđ]*",       # nedostatak, nedostaci...
+  
+  # Inflacijski negativni
+  "hiperinflacij[aeiou]*",     # hiperinflacija...
+  "stagflacij[aeiou]*",        # stagflacija...
+  "poskupljenj[aeiou]*",       # poskupljenje, poskupljenja...
+  "skupo[cć][aeiou]*",         # skupoća...
+  
+  # Ekonomski negativni
+  "recesij[aeiou]*",           # recesija...
+  "nezaposlen[a-zčćžšđ]*",     # nezaposlenost, nezaposleni...
+  "siroma[sš]tv[aeiou]*",      # siromaštvo...
+  "du[gž][aeiou]*"             # dug, dugovi...
+)
+
+sentiment_positive_stems <- c(
+  # Stabilizacija
+  "stabilizacij[aeiou]*",      # stabilizacija...
+  "stabilan[a-zčćžšđ]*",       # stabilan, stabilnost...
+  "oporav[a-zčćžšđ]*",         # oporavak, oporavljanje...
+  
+  # Poboljšanje
+  "pobolj[sš]anj[aeiou]*",     # poboljšanje...
+  "rast[aeiou]*",              # rast (pozitivan kontekst)
+  "porast[aeiou]*",            # porast (npr. plaća)
+  "pove[cć]anj[aeiou]*",       # povećanje...
+  
+  # Pozitivni ekonomski
+  "prosperitet[aeiou]*",       # prosperitet...
+  "blagostanj[aeiou]*",        # blagostanje...
+  "napred[a-zčćžšđ]*",         # napredak...
+  
+  # Dezinflacija
+  "dezinflacij[aeiou]*",       # dezinflacija...
+  "usporavanj[aeiou]*",        # usporavanje inflacije...
+  "sniz[aeiou]*",              # sniženje, snižavanje...
+  
+  # Mjere i rješenja
+  "rje[sš]enj[aeiou]*",        # rješenje...
+  "mjer[aeiou]*",              # mjere...
+  "potpor[aeiou]*",            # potpora, potpore...
+  "pomo[cć][aeiou]*"           # pomoć...
+)
+
+# Funkcija za brojanje pojmova korištenjem stemova
+count_sentiment <- function(text, patterns) {
+  if(is.na(text) || text == "") return(0)
+  text_lower <- tolower(text)
+  sum(sapply(patterns, function(p) stri_count_regex(text_lower, p)))
+}
+
+# Izračun sentimenta za svaki članak
+dt[, neg_count := sapply(FULL_TEXT, count_sentiment, patterns = sentiment_negative_stems)]
+dt[, pos_count := sapply(FULL_TEXT, count_sentiment, patterns = sentiment_positive_stems)]
+
+# Izračun sentiment skora
+dt[, sentiment_score := (pos_count - neg_count) / (pos_count + neg_count + 1)]
+
+# Kategorijalni sentiment
+dt[, AUTO_SENTIMENT := fcase(
+  sentiment_score < -0.2, -1,
+  sentiment_score > 0.2, 1,
+  default = 0
+)]
+```
+
+## Dinamika sentimenta kroz vrijeme
+
+Na sljedećem grafikonu se prikazuje evolucija sentimenta u medijskom izvještavanju o inflaciji. Negativne vrijednosti indiciraju zabrinutost i krizno izvještavanje, dok pozitivne vrijednosti ukazuju na optimističniji ton.
 
 ```{r sentiment-time}
 #| label: sentiment-time
 #| fig-cap: "Dinamika sentimenta kroz vrijeme"
 
-if("AUTO_SENTIMENT" %in% names(dt)) {
-  sentiment_monthly <- dt[!is.na(AUTO_SENTIMENT), .(
-    avg_sentiment = mean(AUTO_SENTIMENT),
-    N = .N,
-    pct_negative = sum(AUTO_SENTIMENT == -1) / .N * 100,
-    pct_positive = sum(AUTO_SENTIMENT == 1) / .N * 100
-  ), by = yearmonth][order(yearmonth)]
-  
-  ggplot(sentiment_monthly, aes(x = yearmonth)) +
-    geom_hline(yintercept = 0, color = "gray50", linetype = "dashed") +
-    geom_line(aes(y = avg_sentiment), color = colors_gimes["primary"], linewidth = 1) +
-    geom_point(aes(y = avg_sentiment, size = N), color = colors_gimes["primary"], alpha = 0.6) +
-    geom_smooth(aes(y = avg_sentiment), method = "loess", se = TRUE, 
-                color = colors_gimes["secondary"], fill = colors_gimes["secondary"], alpha = 0.2) +
-    scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-    scale_size_continuous(range = c(2, 6), labels = comma) +
-    labs(
-      title = "Prosječni sentiment članaka kroz vrijeme",
-      subtitle = "Crvena linija = LOESS trend",
-      x = NULL,
-      y = "Prosječni sentiment (-1 do 1)",
-      size = "Broj članaka"
-    ) +
-    theme(
-      plot.title = element_text(face = "bold"),
-      legend.position = "bottom"
-    )
-}
+sentiment_monthly <- dt[, .(
+  avg_sentiment = mean(sentiment_score, na.rm = TRUE),
+  N = .N,
+  pct_negative = sum(AUTO_SENTIMENT == -1, na.rm = TRUE) / .N * 100,
+  pct_positive = sum(AUTO_SENTIMENT == 1, na.rm = TRUE) / .N * 100,
+  pct_neutral = sum(AUTO_SENTIMENT == 0, na.rm = TRUE) / .N * 100
+), by = yearmonth][order(yearmonth)]
+
+ggplot(sentiment_monthly, aes(x = yearmonth)) +
+  geom_hline(yintercept = 0, color = "gray50", linetype = "dashed") +
+  geom_ribbon(aes(ymin = pmin(avg_sentiment, 0), ymax = 0), 
+              fill = colors_gimes["secondary"], alpha = 0.3) +
+  geom_ribbon(aes(ymin = 0, ymax = pmax(avg_sentiment, 0)), 
+              fill = colors_gimes["success"], alpha = 0.3) +
+  geom_line(aes(y = avg_sentiment), color = colors_gimes["primary"], linewidth = 1.2) +
+  geom_point(aes(y = avg_sentiment, size = N), color = colors_gimes["primary"], alpha = 0.6) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  scale_size_continuous(range = c(2, 6), labels = comma) +
+  labs(
+    title = "Prosječni sentiment članaka kroz vrijeme",
+    subtitle = "Negativne vrijednosti = zabrinutost | Pozitivne vrijednosti = optimizam",
+    x = NULL,
+    y = "Prosječni sentiment",
+    size = "Broj članaka"
+  )
 ```
 
-# Dnevni indikator medijske pozornosti
+## Distribucija sentimenta
 
-Dnevni broj članaka o inflaciji predstavlja jednostavan ali informativan pokazatelj medijske pozornosti na inflacijske teme. Ovaj indikator može služiti kao proxy za javnu percepciju inflacijskih pritisaka u Hrvatskoj u realnom vremenu.
+```{r sentiment-distribution}
+#| label: sentiment-distribution
+#| fig-cap: "Distribucija sentimenta članaka"
 
-## Metodologija dnevnog indikatora
-
-Indikator se temelji na jednostavnom brojanju članaka koji zadovoljavaju kriterije filtriranja za inflacijsku tematiku. Za izglađivanje dnevnih fluktuacija se koristi 30-dnevni klizni prosjek koji daje stabilniju sliku trenda medijske pozornosti.
-
-::: {.callout-note collapse="true" title="Tehnička metodologija dnevnog indikatora"}
-
-**Formula za klizni prosjek:**
-
-$$
-\text{MA}_{30,t} = \frac{1}{30} \sum_{i=t-14}^{t+15} N_i
-$$
-
-gdje je $N_i$ broj članaka na dan $i$, a koristi se centrirani klizni prosjek.
-
-**Normalizacija na skalu 0-100:**
-
-$$
-\text{Indeks}_t = \frac{\text{MA}_{30,t} - \min(\text{MA}_{30})}{\max(\text{MA}_{30}) - \min(\text{MA}_{30})} \times 100
-$$
-
-**Interpretacija vrijednosti:**
-
-- 0-25: Niska medijska pozornost na inflaciju
-- 25-50: Umjerena medijska pozornost
-- 50-75: Visoka medijska pozornost
-- 75-100: Vrlo visoka medijska pozornost (krizna razdoblja)
-
-**Prednosti dnevnog indikatora:**
-
-- Visoka frekvencija omogućuje praćenje u realnom vremenu
-- Jednostavna interpretacija
-- Robustnost na outliere kroz klizni prosjek
-
-:::
-
-```{r daily-standalone-indicator}
-#| label: daily-standalone-indicator
-#| fig-cap: "Dnevni broj spominjanja inflacije kao samostalni indikator"
-#| fig-height: 8
-
-# Izračunaj statistike za anotacije
-peak_date <- daily[which.max(MA30), date]
-peak_value <- daily[which.max(MA30), MA30]
-avg_value <- mean(daily$MA30, na.rm = TRUE)
-
-# Identificiraj ključne periode
-daily[, period := fcase(
-  date < as.Date("2022-01-01"), "Pred-inflacijski period",
-  date >= as.Date("2022-01-01") & date < as.Date("2023-07-01"), "Inflacijski vrhunac",
-  date >= as.Date("2023-07-01"), "Normalizacija"
+sentiment_dist <- dt[, .(N = .N), by = AUTO_SENTIMENT]
+sentiment_dist[, Kategorija := fcase(
+  AUTO_SENTIMENT == -1, "Negativan",
+  AUTO_SENTIMENT == 0, "Neutralan",
+  AUTO_SENTIMENT == 1, "Pozitivan"
 )]
 
-ggplot(daily, aes(x = date)) +
-  geom_rect(aes(xmin = as.Date("2022-01-01"), xmax = as.Date("2023-07-01"),
-                ymin = -Inf, ymax = Inf), fill = colors_gimes["secondary"], alpha = 0.1) +
-  geom_col(aes(y = N), fill = "gray80", alpha = 0.4, width = 1) +
-  geom_line(aes(y = MA7), color = colors_gimes["accent"], linewidth = 0.6, alpha = 0.6, na.rm = TRUE) +
-  geom_line(aes(y = MA30), color = colors_gimes["primary"], linewidth = 1.3, na.rm = TRUE) +
-  geom_hline(yintercept = avg_value, color = colors_gimes["warning"], linetype = "dashed", linewidth = 0.8) +
-  annotate("point", x = peak_date, y = peak_value, color = colors_gimes["secondary"], size = 4) +
-  annotate("text", x = peak_date, y = peak_value + 3, 
-           label = paste0("Vrhunac: ", format(peak_date, "%d.%m.%Y")),
-           color = colors_gimes["secondary"], fontface = "bold", size = 3.5, hjust = 0) +
-  annotate("text", x = min(daily$date) + 30, y = avg_value + 2,
-           label = paste0("Prosjek: ", round(avg_value, 1), " članaka/dan"),
-           color = colors_gimes["warning"], fontface = "bold", size = 3.5, hjust = 0) +
-  annotate("text", x = as.Date("2022-10-01"), y = max(daily$N, na.rm = TRUE) * 0.95,
-           label = "Inflacijski vrhunac", color = colors_gimes["secondary"], 
-           fontface = "italic", size = 3.5) +
-  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  scale_y_continuous(labels = comma, expand = expansion(mult = c(0, 0.05))) +
+ggplot(sentiment_dist, aes(x = Kategorija, y = N, fill = Kategorija)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = paste0(format(N, big.mark = ","), "\n(", 
+                               round(N/sum(N)*100, 1), "%)")), 
+            vjust = -0.2, size = 4) +
+  scale_fill_manual(values = c("Negativan" = colors_gimes["secondary"],
+                               "Neutralan" = colors_gimes["light"],
+                               "Pozitivan" = colors_gimes["success"])) +
+  scale_y_continuous(labels = comma, expand = expansion(mult = c(0, 0.15))) +
   labs(
-    title = "Dnevni broj spominjanja inflacije u hrvatskim medijima",
-    subtitle = "Samostalni indikator medijske pozornosti | Tamna linija = 30-dnevni MA | Svijetla linija = 7-dnevni MA",
+    title = "Distribucija sentimenta članaka",
     x = NULL,
     y = "Broj članaka"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold", size = 14),
-    plot.subtitle = element_text(size = 10, color = "gray40"),
-    panel.grid.minor = element_blank(),
-    axis.text.x = element_text(size = 9)
   )
-```
-
-## Normalizirani dnevni indikator (0-100)
-
-```{r daily-normalized-indicator}
-#| label: daily-normalized-indicator
-#| fig-cap: "Normalizirani dnevni indikator medijske inflacije"
-#| fig-height: 7
-
-daily[, MA30_norm := (MA30 - min(MA30, na.rm = TRUE)) / 
-        (max(MA30, na.rm = TRUE) - min(MA30, na.rm = TRUE)) * 100]
-
-ggplot(daily[!is.na(MA30_norm)], aes(x = date)) +
-  geom_ribbon(aes(ymin = 0, ymax = MA30_norm), fill = colors_gimes["accent"], alpha = 0.3) +
-  geom_line(aes(y = MA30_norm), color = colors_gimes["primary"], linewidth = 1.2) +
-  geom_hline(yintercept = c(25, 50, 75), linetype = "dotted", color = "gray60") +
-  annotate("text", x = max(daily$date) - 60, y = 12.5, label = "Niska pozornost", 
-           color = "gray50", size = 3, fontface = "italic") +
-  annotate("text", x = max(daily$date) - 60, y = 37.5, label = "Umjerena pozornost", 
-           color = "gray50", size = 3, fontface = "italic") +
-  annotate("text", x = max(daily$date) - 60, y = 62.5, label = "Visoka pozornost", 
-           color = "gray50", size = 3, fontface = "italic") +
-  annotate("text", x = max(daily$date) - 60, y = 87.5, label = "Vrlo visoka pozornost", 
-           color = "gray50", size = 3, fontface = "italic") +
-  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, 25)) +
-  labs(
-    title = "Normalizirani indikator medijske pozornosti na inflaciju",
-    subtitle = "Skala 0-100 temeljena na 30-dnevnom kliznom prosjeku broja članaka",
-    x = NULL,
-    y = "Indeks medijske pozornosti"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold", size = 14),
-    plot.subtitle = element_text(size = 10, color = "gray40"),
-    panel.grid.minor = element_blank()
-  )
-```
-
-## Statistike dnevnog indikatora
-
-```{r daily-indicator-stats}
-#| label: daily-indicator-stats
-
-daily_stats <- data.table(
-  Metrika = c(
-    "Prosječan broj članaka dnevno",
-    "Medijan članaka dnevno",
-    "Maksimalan broj članaka (jedan dan)",
-    "Datum maksimuma",
-    "Standardna devijacija",
-    "Prosječni 30-dnevni MA",
-    "Maksimalni 30-dnevni MA",
-    "Datum vrhunca (30-dnevni MA)"
-  ),
-  Vrijednost = c(
-    round(mean(daily$N), 1),
-    round(median(daily$N), 1),
-    max(daily$N),
-    format(daily[which.max(N), date], "%d.%m.%Y"),
-    round(sd(daily$N), 1),
-    round(mean(daily$MA30, na.rm = TRUE), 1),
-    round(max(daily$MA30, na.rm = TRUE), 1),
-    format(daily[which.max(MA30), date], "%d.%m.%Y")
-  )
-)
-
-kable(daily_stats, caption = "Statistike dnevnog indikatora medijske pozornosti") %>%
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
 # Analiza semantičkih pojmova povezanih s inflacijom
 
-U ovoj sekciji se proširuje analiza brojanja riječi "inflacija" na širi skup semantički povezanih pojmova koji mogu bolje pratiti inflacijske trendove u medijskom izvještavanju. Pojmovi se definiraju pomoću korijena riječi (stem) kako bi se osigurala šira morfološka pokrivenost.
+U ovoj sekciji se proširuje analiza na širi skup semantički povezanih pojmova koji mogu bolje pratiti inflacijske trendove u medijskom izvještavanju. Pojmovi se definiraju pomoću korijena riječi (stem) kako bi se osigurala šira morfološka pokrivenost.
 
 ## Definicija rječnika inflacijskih pojmova
 
-Semantička taksonomija se organizira u osam kategorija koje obuhvaćaju različite aspekte inflacije: direktne inflacijske pojmove, cijene i poskupljenja, troškove života, energiju i gorivo, hranu, monetarnu politiku, plaće i primanja te indekse i mjere.
+Semantička taksonomija se organizira u osam kategorija koje obuhvaćaju različite aspekte inflacije. Svaka kategorija predstavlja specifičan sektor ili tematsko područje vezano uz inflaciju.
 
-::: {.callout-note collapse="true" title="Detaljna metodologija semantičke taksonomije"}
-
-**Princip konstrukcije rječnika:**
-
-1. **Kategorije** predstavljaju konceptualno različite aspekte inflacije
-2. **Regex uzorci** se koriste za fleksibilno prepoznavanje morfoloških varijanti
-3. **Korijenski oblici** osiguravaju prepoznavanje svih padežnih i glagolskih oblika
-
-**Morfološka pokrivenost:**
-
-Za hrvatski jezik koji ima bogatu morfologiju, koriste se:
-
-- Korijenski oblici s opcionalnim nastavcima: `inflacij[a-zčćžšđ]*` prepoznaje inflacija, inflacijski, inflacijom...
-- Alternativni oblici: `(cijena|cijena)` prepoznaje varijante
-- Wildcard znakovi: `.{0,10}` dopušta do 10 bilo kojih znakova između riječi
-
-**Formula za brojanje:**
-
-$$
-\text{count}_{c,d} = \sum_{p \in P_c} \text{matches}(p, d)
-$$
-
-gdje je $P_c$ skup regex uzoraka za kategoriju $c$, a $d$ je tekst dokumenta.
-
-**Primjeri morfološke pokrivenosti:**
-
-- `inflacij[a-zčćžšđ]*` → inflacija, inflacijski, inflacijom, inflacije, inflaciji
-- `poskupljenj[a-zčćžšđ]*` → poskupljenje, poskupljenja, poskupljenju
-- `cijen[a-zčćžšđ]*` → cijena, cijene, cijeni, cijenama
-
-:::
+<details>
+<summary>**Kliknite za prikaz kompletne tablice semantičkog rječnika**</summary>
 
 ```{r semantic-dictionary}
 #| label: semantic-dictionary
@@ -671,76 +618,76 @@ semantic_terms <- list(
   
   # Direktni inflacijski pojmovi - STEMMED
   inflacija_direktno = c(
-    "inflacij[a-zčćžšđ]*",           # inflacija, inflacijski, inflacijom...
-    "dezinflacij[a-zčćžšđ]*",        # dezinflacija
-    "hiperinflacij[a-zčćžšđ]*",      # hiperinflacija
-    "stagflacij[a-zčćžšđ]*"          # stagflacija
+    "inflacij[a-zčćžšđ]*",
+    "dezinflacij[a-zčćžšđ]*",
+    "hiperinflacij[a-zčćžšđ]*",
+    "stagflacij[a-zčćžšđ]*"
   ),
   
   # Cijene i poskupljenja - STEMMED
   cijene_poskupljenja = c(
-    "poskupljenj[a-zčćžšđ]*",        # poskupljenje
-    "poskupi[a-zčćžšđ]*",            # poskupiti, poskupilo
-    "porast.{0,10}cijen[a-zčćžšđ]*", # porast cijena
-    "rast.{0,10}cijen[a-zčćžšđ]*",   # rast cijena
-    "vi[sš][aeiou]+.{0,10}cijen[a-zčćžšđ]*", # više cijene
-    "skok.{0,10}cijen[a-zčćžšđ]*",   # skok cijena
-    "skupo[cć][a-zčćžšđ]*",          # skupoća
-    "skuplj[a-zčćžšđ]*"              # skuplje
+    "poskupljenj[a-zčćžšđ]*",
+    "poskupi[a-zčćžšđ]*",
+    "porast.{0,10}cijen[a-zčćžšđ]*",
+    "rast.{0,10}cijen[a-zčćžšđ]*",
+    "vi[sš][aeiou]+.{0,10}cijen[a-zčćžšđ]*",
+    "skok.{0,10}cijen[a-zčćžšđ]*",
+    "skupo[cć][a-zčćžšđ]*",
+    "skuplj[a-zčćžšđ]*"
   ),
   
   # Troškovi života - STEMMED
   troskovi_zivota = c(
-    "tro[sš]kov[a-zčćžšđ]*.{0,10}[zž]ivot[a-zčćžšđ]*",  # troškovi života
-    "[zž]ivotn[a-zčćžšđ]*.{0,10}standard[a-zčćžšđ]*",   # životni standard
-    "kupovn[a-zčćžšđ]*.{0,10}mo[cć][a-zčćžšđ]*",       # kupovna moć
-    "egzistencij[a-zčćžšđ]*"         # egzistencija
+    "tro[sš]kov[a-zčćžšđ]*.{0,10}[zž]ivot[a-zčćžšđ]*",
+    "[zž]ivotn[a-zčćžšđ]*.{0,10}standard[a-zčćžšđ]*",
+    "kupovn[a-zčćžšđ]*.{0,10}mo[cć][a-zčćžšđ]*",
+    "egzistencij[a-zčćžšđ]*"
   ),
   
   # Energija i gorivo - STEMMED
   energija_gorivo = c(
-    "cijen[a-zčćžšđ]*.{0,10}energij[a-zčćžšđ]*",  # cijena energije
-    "cijen[a-zčćžšđ]*.{0,10}goriv[a-zčćžšđ]*",   # cijena goriva
-    "cijen[a-zčćžšđ]*.{0,10}struj[a-zčćžšđ]*",   # cijena struje
-    "cijen[a-zčćžšđ]*.{0,10}plin[a-zčćžšđ]*",    # cijena plina
-    "energetsk[a-zčćžšđ]*.{0,10}kriz[a-zčćžšđ]*" # energetska kriza
+    "cijen[a-zčćžšđ]*.{0,10}energij[a-zčćžšđ]*",
+    "cijen[a-zčćžšđ]*.{0,10}goriv[a-zčćžšđ]*",
+    "cijen[a-zčćžšđ]*.{0,10}struj[a-zčćžšđ]*",
+    "cijen[a-zčćžšđ]*.{0,10}plin[a-zčćžšđ]*",
+    "energetsk[a-zčćžšđ]*.{0,10}kriz[a-zčćžšđ]*"
   ),
   
   # Hrana i prehrambeni proizvodi - STEMMED
   hrana = c(
-    "cijen[a-zčćžšđ]*.{0,10}hran[a-zčćžšđ]*",     # cijena hrane
-    "cijen[a-zčćžšđ]*.{0,10}namirnic[a-zčćžšđ]*", # cijena namirnica
-    "prehramben[a-zčćžšđ]*.{0,10}proizvod[a-zčćžšđ]*", # prehrambeni proizvodi
-    "cijen[a-zčćžšđ]*.{0,10}kruh[a-zčćžšđ]*",    # cijena kruha
-    "cijen[a-zčćžšđ]*.{0,10}mlijeka?"             # cijena mlijeka
+    "cijen[a-zčćžšđ]*.{0,10}hran[a-zčćžšđ]*",
+    "cijen[a-zčćžšđ]*.{0,10}namirnic[a-zčćžšđ]*",
+    "prehramben[a-zčćžšđ]*.{0,10}proizvod[a-zčćžšđ]*",
+    "cijen[a-zčćžšđ]*.{0,10}kruh[a-zčćžšđ]*",
+    "cijen[a-zčćžšđ]*.{0,10}mlijeka?"
   ),
   
   # Monetarna politika - STEMMED
   monetarna_politika = c(
-    "kamatn[a-zčćžšđ]*.{0,10}stop[a-zčćžšđ]*",   # kamatna stopa
-    "kamat[a-zčćžšđ]*",               # kamate
-    "\\bhnb\\b",                       # HNB
-    "\\becb\\b",                       # ECB
-    "monetarn[a-zčćžšđ]*.{0,10}politik[a-zčćžšđ]*", # monetarna politika
-    "euroz[ao]n[a-zčćžšđ]*"           # eurozona
+    "kamatn[a-zčćžšđ]*.{0,10}stop[a-zčćžšđ]*",
+    "kamat[a-zčćžšđ]*",
+    "\\bhnb\\b",
+    "\\becb\\b",
+    "monetarn[a-zčćžšđ]*.{0,10}politik[a-zčćžšđ]*",
+    "euroz[ao]n[a-zčćžšđ]*"
   ),
   
   # Plaće i primanja - STEMMED
   place_primanja = c(
-    "pla[cć][a-zčćžšđ]*",             # plaće
-    "primanj[a-zčćžšđ]*",             # primanja
-    "mirovin[a-zčćžšđ]*",             # mirovine
-    "realn[a-zčćžšđ]*.{0,10}pla[cć][a-zčćžšđ]*",  # realna plaća
-    "rast.{0,10}pla[cć][a-zčćžšđ]*"   # rast plaća
+    "pla[cć][a-zčćžšđ]*",
+    "primanj[a-zčćžšđ]*",
+    "mirovin[a-zčćžšđ]*",
+    "realn[a-zčćžšđ]*.{0,10}pla[cć][a-zčćžšđ]*",
+    "rast.{0,10}pla[cć][a-zčćžšđ]*"
   ),
   
   # Indeksi i mjere - STEMMED
   indeksi_mjere = c(
-    "\\bhicp\\b",                      # HICP
-    "indeks.{0,10}potro[sš][a-zčćžšđ]*", # indeks potrošačkih cijena
-    "\\bcpi\\b",                       # CPI
-    "bazn[a-zčćžšđ]*.{0,10}inflacij[a-zčćžšđ]*", # bazna inflacija
-    "jezgren[a-zčćžšđ]*.{0,10}inflacij[a-zčćžšđ]*" # jezgrena inflacija
+    "\\bhicp\\b",
+    "indeks.{0,10}potro[sš][a-zčćžšđ]*",
+    "\\bcpi\\b",
+    "bazn[a-zčćžšđ]*.{0,10}inflacij[a-zčćžšđ]*",
+    "jezgren[a-zčćžšđ]*.{0,10}inflacij[a-zčćžšđ]*"
   )
 )
 
@@ -749,13 +696,6 @@ term_summary <- data.table(
   Broj_pojmova = sapply(semantic_terms, length),
   Primjeri = sapply(semantic_terms, function(x) paste(head(x, 2), collapse = ", "))
 )
-```
-
-<details>
-<summary>**Kliknite za prikaz kompletne tablice semantičkog rječnika**</summary>
-
-```{r semantic-table}
-#| label: semantic-table
 
 kable(term_summary, 
       col.names = c("Kategorija", "Broj pojmova", "Primjeri regex uzoraka"),
@@ -765,9 +705,53 @@ kable(term_summary,
 
 </details>
 
-## Brojanje semantičkih pojmova po člancima
+## Konstrukcija sektorskih indeksa
 
-Za svaki članak se zbrajaju pojavljivanja pojmova iz svake kategorije. Brojanje se provodi korištenjem regularnih izraza (regex) koji prepoznaju morfološke varijante pojmova.
+Za svaku semantičku kategoriju se konstruira sektorski indeks koji prati intenzitet medijskog izvještavanja o tom specifičnom aspektu inflacije. Sektorskim indeksima se omogućuje praćenje koje teme dominiraju u medijskom diskursu kroz vrijeme.
+
+Konstrukcija sektorskih indeksa se provodi kroz sljedeće korake: za svaki članak se zbrajaju pojavljivanja pojmova iz svake kategorije korištenjem regex uzoraka, zatim se vrijednosti agregiraju na mjesečnoj razini, te se na kraju normaliziraju na skalu 0 do 100 za usporedivost.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija konstrukcije sektorskih indeksa"}
+
+**Korak 1: Brojanje pojmova po člancima**
+
+Za svaki članak $d$ i kategoriju $c$ se broji ukupan broj pojavljivanja pojmova:
+
+$$
+\text{count}_{c,d} = \sum_{p \in P_c} \text{matches}(p, d)
+$$
+
+gdje je $P_c$ skup regex uzoraka za kategoriju $c$.
+
+**Korak 2: Mjesečna agregacija**
+
+Za svaki mjesec $m$ se izračunava ukupan broj pojmova po kategoriji:
+
+$$
+\text{Total}_{c,m} = \sum_{d \in m} \text{count}_{c,d}
+$$
+
+**Korak 3: Normalizacija na skalu 0 do 100**
+
+Za usporedivost između kategorija se primjenjuje min-max normalizacija:
+
+$$
+\text{Index}_{c,m} = \frac{\text{Total}_{c,m} - \min(\text{Total}_c)}{\max(\text{Total}_c) - \min(\text{Total}_c)} \times 100
+$$
+
+**Interpretacija:**
+
+- 0 = minimalna aktivnost za tu kategoriju u promatranom razdoblju
+- 100 = maksimalna aktivnost za tu kategoriju
+- Vrijednosti između indiciraju relativni intenzitet u odnosu na ekstreme
+
+**Prednosti normalizacije:**
+
+- Omogućuje usporedbu kategorija različitih apsolutnih veličina
+- Vizualno prikazuje relativne trendove unutar svake kategorije
+- Olakšava identifikaciju vrhunaca i minimuma za svaki sektor
+
+:::
 
 ```{r count-semantic-terms}
 #| label: count-semantic-terms
@@ -786,9 +770,7 @@ for(cat_name in names(semantic_terms)) {
 }
 
 dt[, count_all_semantic := rowSums(.SD), .SDcols = patterns("^count_")]
-
-dt[, inflacija_count := sapply(FULL_TEXT, count_terms, 
-                                patterns = semantic_terms$inflacija_direktno)]
+dt[, inflacija_count := sapply(FULL_TEXT, count_terms, patterns = semantic_terms$inflacija_direktno)]
 ```
 
 ## Mjesečna agregacija semantičkih pojmova
@@ -807,226 +789,212 @@ monthly_semantic <- dt[, c(
 ), by = yearmonth, .SDcols = semantic_cols][order(yearmonth)]
 
 monthly_semantic[, total_mentions := count_all_semantic]
-```
 
-## Vizualizacija semantičkih kategorija kroz vrijeme
-
-Na sljedećem grafikonu se prikazuje dinamika svih osam semantičkih kategorija kroz vrijeme. Svaki panel prikazuje mjesečni broj spominjanja pojmova iz jedne kategorije.
-
-```{r semantic-time-series}
-#| label: semantic-time-series
-#| fig-cap: "Dinamika semantičkih kategorija kroz vrijeme"
-#| fig-height: 10
-
-semantic_long <- melt(
-  monthly_semantic[, .(yearmonth, 
-                       count_inflacija_direktno,
-                       count_cijene_poskupljenja,
-                       count_troskovi_zivota,
-                       count_energija_gorivo,
-                       count_hrana,
-                       count_monetarna_politika,
-                       count_place_primanja,
-                       count_indeksi_mjere)],
-  id.vars = "yearmonth",
-  variable.name = "kategorija",
-  value.name = "broj"
-)
-
-category_labels <- c(
-  "count_inflacija_direktno" = "Inflacija (direktno)",
-  "count_cijene_poskupljenja" = "Cijene/Poskupljenja",
-  "count_troskovi_zivota" = "Troškovi života",
-  "count_energija_gorivo" = "Energija/Gorivo",
-  "count_hrana" = "Hrana",
-  "count_monetarna_politika" = "Monetarna politika",
-  "count_place_primanja" = "Plaće/Primanja",
-  "count_indeksi_mjere" = "Indeksi/Mjere"
-)
-
-semantic_long[, kategorija_label := category_labels[as.character(kategorija)]]
-
-ggplot(semantic_long, aes(x = yearmonth, y = broj, color = kategorija_label)) +
-  geom_line(linewidth = 1) +
-  facet_wrap(~kategorija_label, ncol = 2, scales = "free_y") +
-  scale_x_date(date_breaks = "6 months", date_labels = "%b %y") +
-  scale_color_brewer(palette = "Set2") +
-  labs(
-    title = "Dinamika semantičkih kategorija kroz vrijeme",
-    subtitle = "Mjesečni broj spominjanja po kategoriji pojmova",
-    x = NULL,
-    y = "Broj spominjanja",
-    color = NULL
-  ) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    legend.position = "none",
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    strip.text = element_text(face = "bold")
-  )
-```
-
-## Usporedba kategorija s Eurostat HICP
-
-U ovom poglavlju se izračunavaju korelacije između semantičkih kategorija i službene inflacije (Eurostat HICP). Korelacijska analiza omogućuje identifikaciju kategorija koje najbolje prate stvarne inflacijske trendove.
-
-```{r semantic-vs-hicp}
-#| label: semantic-vs-hicp
-#| fig-cap: "Korelacije semantičkih kategorija s HICP inflacijom"
-
-eurostat_headline <- NULL
-tryCatch({
-  hicp_data <- get_eurostat("prc_hicp_manr", 
-                            filters = list(geo = "HR", 
-                                          coicop = "CP00",
-                                          unit = "RCH_A"),
-                            time_format = "date")
-  setDT(hicp_data)
-  eurostat_headline <- hicp_data[time >= "2021-01-01" & time <= "2024-11-01", 
-                                   .(yearmonth = time, eurostat_hicp = values)]
-}, error = function(e) {
-  eurostat_headline <<- data.table(
-    yearmonth = seq(as.Date("2021-01-01"), as.Date("2024-11-01"), by = "month"),
-    eurostat_hicp = c(
-      0.2, 0.6, 0.8, 1.9, 2.4, 2.3, 2.6, 3.0, 3.3, 3.8, 4.8, 5.5,
-      5.8, 6.3, 7.3, 9.4, 10.8, 12.1, 12.3, 12.4, 12.8, 13.0, 13.0, 12.7,
-      12.0, 11.1, 10.5, 9.2, 8.4, 8.2, 7.3, 7.7, 7.1, 5.3, 4.9, 4.7,
-      4.3, 4.0, 3.9, 3.7, 3.6, 3.4, 3.2, 2.9, 2.8, 2.6, 2.4
-    )
-  )
-})
-
-semantic_hicp <- merge(monthly_semantic, eurostat_headline, by = "yearmonth", all.x = TRUE)
-
-correlation_results <- data.table(
-  Kategorija = character(),
-  Korelacija = numeric(),
-  P_vrijednost = numeric()
-)
-
-for(col in semantic_cols[semantic_cols != "count_all_semantic"]) {
-  cor_test <- cor.test(semantic_hicp[[col]], semantic_hicp$eurostat_hicp, 
-                       use = "complete.obs")
-  correlation_results <- rbind(correlation_results, data.table(
-    Kategorija = gsub("count_", "", col),
-    Korelacija = round(cor_test$estimate, 3),
-    P_vrijednost = round(cor_test$p.value, 4)
-  ))
+# Normalizacija sektorskih indeksa
+normalize <- function(x) {
+  if(all(is.na(x))) return(rep(50, length(x)))
+  min_x <- min(x, na.rm = TRUE)
+  max_x <- max(x, na.rm = TRUE)
+  if(max_x == min_x) return(rep(50, length(x)))
+  (x - min_x) / (max_x - min_x) * 100
 }
 
-cor_test_all <- cor.test(semantic_hicp$count_all_semantic, semantic_hicp$eurostat_hicp, 
-                         use = "complete.obs")
-correlation_results <- rbind(correlation_results, data.table(
-  Kategorija = "SVE KATEGORIJE",
-  Korelacija = round(cor_test_all$estimate, 3),
-  P_vrijednost = round(cor_test_all$p.value, 4)
-))
-
-correlation_results <- correlation_results[order(-Korelacija)]
-
-kable(correlation_results, 
-      col.names = c("Kategorija pojmova", "Korelacija s HICP", "P vrijednost"),
-      caption = "Korelacije semantičkih kategorija s Eurostat HICP inflacijom") %>%
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
-  row_spec(which.max(correlation_results$Korelacija), bold = TRUE, 
-           background = colors_gimes["success"])
+monthly_semantic[, `:=`(
+  idx_inflacija = normalize(count_inflacija_direktno),
+  idx_cijene = normalize(count_cijene_poskupljenja),
+  idx_troskovi = normalize(count_troskovi_zivota),
+  idx_energija = normalize(count_energija_gorivo),
+  idx_hrana = normalize(count_hrana),
+  idx_monetarna = normalize(count_monetarna_politika),
+  idx_place = normalize(count_place_primanja),
+  idx_indeksi = normalize(count_indeksi_mjere)
+)]
 ```
 
-## Semantički indeks vs službena inflacija
+## Vizualizacija sektorskih indeksa
 
-```{r semantic-index-plot}
-#| label: semantic-index-plot
-#| fig-cap: "Ukupni semantički indeks vs Eurostat HICP"
-#| fig-height: 8
+Na sljedećim grafikonima se prikazuju normalizirani sektorski indeksi (skala 0 do 100) za svaku od osam semantičkih kategorija. Svakim indeksom se prati relativni intenzitet medijskog izvještavanja o specifičnom aspektu inflacije.
 
-semantic_hicp[, semantic_norm := (count_all_semantic - min(count_all_semantic, na.rm = TRUE)) / 
-                (max(count_all_semantic, na.rm = TRUE) - min(count_all_semantic, na.rm = TRUE)) * 
-                max(eurostat_hicp, na.rm = TRUE)]
+```{r sector-indices-plot}
+#| label: sector-indices-plot
+#| fig-cap: "Sektorski indeksi medijske pozornosti"
+#| fig-height: 12
 
-ggplot(semantic_hicp, aes(x = yearmonth)) +
-  geom_col(aes(y = count_all_semantic / max(count_all_semantic, na.rm = TRUE) * 
-                 max(eurostat_hicp, na.rm = TRUE)), 
-           fill = colors_gimes["accent"], alpha = 0.4, width = 25) +
-  geom_line(aes(y = eurostat_hicp, color = "Eurostat HICP"), linewidth = 1.5) +
-  geom_point(aes(y = eurostat_hicp), color = colors_gimes["secondary"], size = 2) +
-  scale_y_continuous(
-    name = "HICP Inflacija (YoY %)",
-    sec.axis = sec_axis(~. / max(semantic_hicp$eurostat_hicp, na.rm = TRUE) * 
-                          max(semantic_hicp$count_all_semantic, na.rm = TRUE),
-                        name = "Ukupno semantičkih pojmova")
-  ) +
-  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  scale_color_manual(values = c("Eurostat HICP" = colors_gimes["secondary"])) +
+sector_long <- melt(
+  monthly_semantic[, .(yearmonth, 
+                       idx_inflacija, idx_cijene, idx_troskovi, idx_energija,
+                       idx_hrana, idx_monetarna, idx_place, idx_indeksi)],
+  id.vars = "yearmonth",
+  variable.name = "sektor",
+  value.name = "indeks"
+)
+
+sector_labels <- c(
+  "idx_inflacija" = "Inflacija (direktno)",
+  "idx_cijene" = "Cijene i poskupljenja",
+  "idx_troskovi" = "Troškovi života",
+  "idx_energija" = "Energija i gorivo",
+  "idx_hrana" = "Hrana",
+  "idx_monetarna" = "Monetarna politika",
+  "idx_place" = "Plaće i primanja",
+  "idx_indeksi" = "Indeksi i mjere"
+)
+
+sector_long[, sektor_label := sector_labels[as.character(sektor)]]
+
+ggplot(sector_long, aes(x = yearmonth, y = indeks, color = sektor_label)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 1.5, alpha = 0.6) +
+  facet_wrap(~sektor_label, ncol = 2, scales = "fixed") +
+  scale_x_date(date_breaks = "6 months", date_labels = "%b %y") +
+  scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, 25)) +
+  scale_color_brewer(palette = "Set2") +
   labs(
-    title = "Ukupni broj semantičkih pojmova vs Eurostat HICP",
-    subtitle = paste0("Korelacija: r = ", round(cor_test_all$estimate, 3)),
+    title = "Sektorski indeksi medijske pozornosti na inflaciju",
+    subtitle = "Normalizirani indeksi (0 do 100) po semantičkim kategorijama",
     x = NULL,
+    y = "Indeks (0 do 100)",
     color = NULL
   ) +
-  theme(
-    plot.title = element_text(face = "bold", size = 14),
-    plot.subtitle = element_text(size = 11),
-    legend.position = "bottom",
-    axis.title.y.right = element_text(color = colors_gimes["accent"]),
-    axis.text.y.right = element_text(color = colors_gimes["accent"]),
-    axis.title.y.left = element_text(color = colors_gimes["secondary"])
-  )
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Heatmapa sektorske aktivnosti
+
+Na sljedećoj heatmapi se prikazuje intenzitet medijske pozornosti po sektorima kroz vrijeme. Tamnije boje indiciraju višu razinu aktivnosti u određenom mjesecu za određeni sektor.
+
+Heatmapa se konstruira tako da se za svaki mjesec i svaki sektor prikazuje normalizirana vrijednost indeksa. Normalizacijom se omogućuje usporedba između sektora različitih apsolutnih veličina. Interpretacija je jednostavna: tamnije ćelije predstavljaju periode pojačanog izvještavanja o tom sektoru.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija konstrukcije heatmape"}
+
+**Struktura podataka:**
+
+Heatmapa se konstruira kao matrica s dimenzijama:
+
+- Redci: vremenska razdoblja (mjeseci)
+- Stupci: sektorske kategorije
+- Vrijednosti: normalizirani indeksi (0 do 100)
+
+**Normalizacija za vizualizaciju:**
+
+Za optimalnu vizualnu prezentaciju se primjenjuje dodatna transformacija:
+
+$$
+\text{Heatmap}_{s,m} = \frac{\text{Index}_{s,m}}{\max_m(\text{Index}_s)} \times 100
+$$
+
+Time se osigurava da svaki sektor ima barem jedan mjesec s maksimalnom vrijednošću.
+
+**Odabir palete boja:**
+
+Koristi se sekvencijalna paleta (bijela do tamno plava) koja intuitivno prikazuje intenzitet: svijetle boje za nisku aktivnost, tamne boje za visoku aktivnost.
+
+**Interpretacija uzoraka:**
+
+- Horizontalni tamni pojas: pojačana aktivnost jednog sektora kroz više mjeseci
+- Vertikalni tamni pojas: pojačana aktivnost svih sektora u jednom mjesecu (generalna inflacijska tema)
+- Dijagonalni uzorci: postepeni prijelazi između sektora
+
+:::
+
+```{r sector-heatmap}
+#| label: sector-heatmap
+#| fig-cap: "Heatmapa sektorske aktivnosti"
+#| fig-height: 8
+
+heatmap_data <- sector_long[, .(yearmonth, sektor_label, indeks)]
+heatmap_data[, month_label := format(yearmonth, "%b %Y")]
+
+ggplot(heatmap_data, aes(x = yearmonth, y = sektor_label, fill = indeks)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  scale_fill_gradient2(low = "white", mid = colors_gimes["accent"], high = colors_gimes["primary"],
+                       midpoint = 50, limits = c(0, 100)) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(
+    title = "Heatmapa sektorske medijske aktivnosti",
+    subtitle = "Intenzitet izvještavanja po sektorima kroz vrijeme (0 = minimum, 100 = maksimum)",
+    x = NULL,
+    y = NULL,
+    fill = "Indeks"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+        axis.text.y = element_text(size = 10))
 ```
 
 # GIMES Indeks medijske inflacije
 
-## Metodologija konstrukcije indeksa
+## Opis i konstrukcija indeksa
 
-GIMES indeks (Government-Industry-Media Economic Sentiment) medijske inflacije se konstruira kao kompozitni pokazatelj koji kombinira četiri dimenzije medijskog izvještavanja. Indeks je skaliran na raspon 0-100, gdje viša vrijednost indicira veću medijsku pozornost i zabrinutost oko inflacije.
+GIMES indeks (Government, Industry, Media Economic Sentiment) medijske inflacije se konstruira kao kompozitni pokazatelj koji kombinira četiri dimenzije medijskog izvještavanja. Indeksom se nastoji uhvatiti ukupna razina medijske zabrinutosti oko inflacije u Hrvatskoj.
 
-### Komponente indeksa
+Indeks je skaliran na raspon 0 do 100, gdje viša vrijednost indicira veću medijsku pozornost i zabrinutost oko inflacije. Konstrukcija se temelji na kombinaciji volumena izvještavanja, dubine analize, tona sentimenta i dosega članaka.
 
-**Volumen (40% težina)** predstavlja broj članaka o inflaciji u mjesecu, normaliziran na skalu 0-100. Veći broj članaka signalizira veću medijsku pozornost na inflacijske teme.
+**Komponente indeksa:**
 
-**Intenzitet (20% težina)** mjeri prosječnu duljinu članaka (broj znakova) kao pokazatelj dubine analize. Duži članci ukazuju na detaljnije i analitičnije izvještavanje.
+- **Volumen (40% težina)**: Broj članaka o inflaciji u mjesecu predstavlja osnovni pokazatelj koliko se o inflaciji piše.
+- **Intenzitet (20% težina)**: Prosječna duljina članaka mjeri dubinu i analitičnost izvještavanja.
+- **Sentiment (20% težina)**: Negativniji ton izvještavanja signalizira veću zabrinutost.
+- **Doseg (20% težina)**: Prosječni reach članaka indicira koliko je tema prisutna u javnosti.
 
-**Sentiment (20% težina)** koristi prosječni sentiment članaka (invertiran) za procjenu tona izvještavanja. Negativniji sentiment signalizira veću zabrinutost i rezultira višom vrijednosti indeksa.
-
-**Doseg (20% težina)** obuhvaća prosječni reach/interakcije ako su dostupni. U slučaju nedostupnosti, koristi se neutralna vrijednost od 50.
-
-::: {.callout-note collapse="true" title="Tehnička metodologija GIMES indeksa"}
+::: {.callout-note collapse="true" title="Tehnička metodologija konstrukcije GIMES indeksa"}
 
 **Formula GIMES indeksa:**
 
 $$
-\text{GIMES}_t = 0.4 \times V_{norm,t} + 0.2 \times I_{norm,t} + 0.2 \times (100 - S_{norm,t}) + 0.2 \times R_{norm,t}
+\text{GIMES}_t = 0.40 \times V_{norm,t} + 0.20 \times I_{norm,t} + 0.20 \times (100 - S_{norm,t}) + 0.20 \times R_{norm,t}
 $$
 
 gdje su:
 
-- $V_{norm}$ = normalizirani volumen članaka
-- $I_{norm}$ = normalizirani intenzitet (duljina članaka)
-- $S_{norm}$ = normalizirani sentiment (invertiran tako da negativniji sentiment daje višu vrijednost)
-- $R_{norm}$ = normalizirani doseg
+- $V_{norm,t}$ = normalizirani volumen članaka u mjesecu $t$
+- $I_{norm,t}$ = normalizirani intenzitet (prosječna duljina članaka)
+- $S_{norm,t}$ = normalizirani sentiment (invertiran tako da negativniji sentiment daje višu vrijednost)
+- $R_{norm,t}$ = normalizirani doseg (reach)
 
 **Normalizacija komponenata:**
 
-Svaka komponenta se normalizira korištenjem min-max skaliranja:
+Svaka komponenta se normalizira korištenjem min-max skaliranja na skalu 0 do 100:
 
 $$
 X_{norm} = \frac{X - \min(X)}{\max(X) - \min(X)} \times 100
 $$
 
-**Interpretacija vrijednosti:**
+**Invertiranje sentimenta:**
 
-- 0-25: Niska medijska pozornost na inflaciju
-- 25-50: Umjerena medijska pozornost
-- 50-75: Visoka medijska pozornost
-- 75-100: Vrlo visoka medijska pozornost (inflacijska kriza)
+Budući da negativniji sentiment (niža vrijednost) indicira veću zabrinutost, komponenta sentimenta se invertira:
 
-**Težine komponenata:**
+$$
+S_{inv} = 100 - S_{norm}
+$$
+
+Time se postiže da članci s negativnijim tonom doprinose višoj vrijednosti indeksa.
+
+**Izbor težina:**
 
 Težine su odabrane na temelju empirijske analize korelacije s inflacijom:
 
-- Volumen (40%): najsnažniji prediktor inflacijske dinamike
-- Intenzitet (20%): odražava dubinu analitičkog pokrivanja
-- Sentiment (20%): odražava ton i zabrinutost u izvještavanju
-- Doseg (20%): odražava širinu distribucije vijesti
+- Volumen (40%): najsnažniji prediktor jer direktno mjeri količinu medijske pozornosti
+- Intenzitet (20%): indirektni pokazatelj ozbiljnosti teme
+- Sentiment (20%): mjeri ton i zabrinutost u izvještavanju
+- Doseg (20%): mjeri širinu distribucije vijesti
+
+**Interpretacija vrijednosti:**
+
+| Raspon | Interpretacija |
+|--------|----------------|
+| 0 do 25 | Niska medijska pozornost na inflaciju |
+| 25 do 50 | Umjerena medijska pozornost |
+| 50 do 75 | Visoka medijska pozornost |
+| 75 do 100 | Vrlo visoka medijska pozornost (krizna razdoblja) |
+
+**Klizni prosjek:**
+
+Za izglađivanje mjesečnih fluktuacija se koristi 3-mjesečni klizni prosjek:
+
+$$
+\text{GIMES}_{MA3,t} = \frac{1}{3} \sum_{i=t-1}^{t+1} \text{GIMES}_i
+$$
 
 :::
 
@@ -1036,7 +1004,7 @@ Težine su odabrane na temelju empirijske analize korelacije s inflacijom:
 index_data <- dt[, .(
   volume = .N,
   avg_length = mean(text_length, na.rm = TRUE),
-  avg_sentiment = mean(AUTO_SENTIMENT, na.rm = TRUE),
+  avg_sentiment = mean(sentiment_score, na.rm = TRUE),
   avg_reach = if("REACH" %in% names(.SD)) mean(REACH, na.rm = TRUE) else NA_real_,
   total_reach = if("REACH" %in% names(.SD)) sum(REACH, na.rm = TRUE) else NA_real_,
   avg_interactions = if("INTERACTIONS" %in% names(.SD)) mean(INTERACTIONS, na.rm = TRUE) else NA_real_,
@@ -1050,14 +1018,6 @@ index_data <- dt[, .(
   semantic_place = sum(count_place_primanja, na.rm = TRUE),
   semantic_indeksi = sum(count_indeksi_mjere, na.rm = TRUE)
 ), by = yearmonth][order(yearmonth)]
-
-normalize <- function(x) {
-  if(all(is.na(x))) return(rep(50, length(x)))
-  min_x <- min(x, na.rm = TRUE)
-  max_x <- max(x, na.rm = TRUE)
-  if(max_x == min_x) return(rep(50, length(x)))
-  (x - min_x) / (max_x - min_x) * 100
-}
 
 index_data[, `:=`(
   volume_norm = normalize(volume),
@@ -1080,14 +1040,14 @@ index_data[, gimes_yoy := (gimes_index / shift(gimes_index, 12) - 1) * 100]
 
 ## GIMES Indeks kroz vrijeme
 
-Na sljedećem grafikonu se prikazuje GIMES indeks medijske inflacije kroz vrijeme. Indeks se kreće na skali 0-100, gdje viša vrijednost indicira veću medijsku pozornost na inflaciju.
+Na sljedećem grafikonu se prikazuje GIMES indeks medijske inflacije kroz vrijeme. Indeks se kreće na skali 0 do 100, gdje viša vrijednost indicira veću medijsku pozornost na inflaciju.
 
 ```{r index-plot}
 #| label: index-plot
 #| fig-cap: "GIMES Indeks medijske inflacije"
 #| fig-height: 7
 
-p_index <- ggplot(index_data, aes(x = yearmonth)) +
+ggplot(index_data, aes(x = yearmonth)) +
   geom_ribbon(aes(ymin = 0, ymax = gimes_index), fill = colors_gimes["accent"], alpha = 0.3) +
   geom_line(aes(y = gimes_index), color = colors_gimes["accent"], linewidth = 0.8, alpha = 0.5) +
   geom_line(aes(y = gimes_index_ma3), color = colors_gimes["primary"], linewidth = 1.2, na.rm = TRUE) +
@@ -1096,22 +1056,15 @@ p_index <- ggplot(index_data, aes(x = yearmonth)) +
   scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, 20)) +
   labs(
     title = "GIMES Indeks medijske inflacije",
-    subtitle = "Kompozitni indeks medijske pozornosti na inflaciju (0-100) | Tamna linija = 3-mj. klizni prosjek",
+    subtitle = "Kompozitni indeks medijske pozornosti na inflaciju (0 do 100) | Tamna linija = 3-mjesečni klizni prosjek",
     x = NULL,
     y = "GIMES Index"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold", size = 14),
-    plot.subtitle = element_text(size = 10, color = "gray40"),
-    panel.grid.minor = element_blank()
   )
-
-p_index
 ```
 
 ## Komponente indeksa
 
-Na sljedećem grafikonu se prikazuju četiri komponente GIMES indeksa: volumen, intenzitet, negativni sentiment i doseg. Svaka komponenta je normalizirana na skalu 0-100.
+Na sljedećem grafikonu se prikazuju četiri komponente GIMES indeksa. Svakom komponentom se mjeri različiti aspekt medijskog izvještavanja.
 
 ```{r index-components}
 #| label: index-components
@@ -1146,16 +1099,13 @@ ggplot(components_long, aes(x = yearmonth, y = value, color = component_label)) 
   )) +
   labs(
     title = "Komponente GIMES indeksa",
-    subtitle = "Normalizirane vrijednosti (0-100)",
+    subtitle = "Normalizirane vrijednosti (0 do 100)",
     x = NULL,
     y = "Vrijednost",
     color = NULL
   ) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    legend.position = "none",
-    axis.text.x = element_text(angle = 45, hjust = 1)
-  )
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
 ## Tablica indeksa
@@ -1178,366 +1128,290 @@ kable(tail(index_table, 12),
   row_spec(0, bold = TRUE, background = colors_gimes["primary"], color = "white")
 ```
 
-## Export komponenti indeksa u Excel
+# Volatilnost i momentum
 
-```{r export-components-excel}
-#| label: export-components-excel
+U ovoj sekciji se analizira volatilnost i momentum medijskog izvještavanja o inflaciji. Volatilnošću se mjeri nestabilnost izvještavanja, dok se momentumom mjeri smjer i brzina promjene.
 
-export_data <- index_data[, .(
-  Datum = yearmonth,
-  Godina = year(yearmonth),
-  Mjesec = month(yearmonth),
-  Broj_clanaka = volume,
-  Prosjecna_duljina = round(avg_length, 0),
-  Prosjecni_sentiment = round(avg_sentiment, 3),
-  Prosjecni_reach = round(avg_reach, 0),
-  Semantic_ukupno = semantic_total,
-  Semantic_inflacija = semantic_inflacija,
-  Semantic_cijene = semantic_cijene,
-  Semantic_troskovi = semantic_troskovi,
-  Semantic_energija = semantic_energija,
-  Semantic_hrana = semantic_hrana,
-  Semantic_monetarna = semantic_monetarna,
-  Semantic_place = semantic_place,
-  Semantic_indeksi = semantic_indeksi,
-  Volume_norm = round(volume_norm, 2),
-  Length_norm = round(length_norm, 2),
-  Sentiment_norm = round(sentiment_norm, 2),
-  Sentiment_inv = round(100 - sentiment_norm, 2),
-  Reach_norm = round(reach_norm, 2),
-  Semantic_norm = round(semantic_norm, 2),
-  GIMES_index = round(gimes_index, 2),
-  GIMES_MA3 = round(gimes_index_ma3, 2),
-  GIMES_YoY = round(gimes_yoy, 2)
-)]
+## Konstrukcija volatilnosti
 
-wb <- createWorkbook()
+Volatilnost se izračunava kao standardna devijacija dnevnog broja članaka unutar svakog mjeseca. Viša volatilnost indicira nestabilnije izvještavanje s većim oscilacijama u broju objavljenih članaka.
 
-addWorksheet(wb, "Komponente_indeksa")
-writeData(wb, "Komponente_indeksa", export_data)
+::: {.callout-note collapse="true" title="Tehnička metodologija izračuna volatilnosti"}
 
-header_style <- createStyle(
-  textDecoration = "bold",
-  fgFill = "#2C3E50",
-  fontColour = "white",
-  halign = "center"
-)
-addStyle(wb, "Komponente_indeksa", header_style, rows = 1, cols = 1:ncol(export_data))
-setColWidths(wb, "Komponente_indeksa", cols = 1:ncol(export_data), widths = "auto")
-
-addWorksheet(wb, "Semanticke_kategorije")
-semantic_export <- monthly_semantic[, .(
-  Datum = yearmonth,
-  Broj_clanaka = N,
-  Inflacija_direktno = count_inflacija_direktno,
-  Cijene_poskupljenja = count_cijene_poskupljenja,
-  Troskovi_zivota = count_troskovi_zivota,
-  Energija_gorivo = count_energija_gorivo,
-  Hrana = count_hrana,
-  Monetarna_politika = count_monetarna_politika,
-  Place_primanja = count_place_primanja,
-  Indeksi_mjere = count_indeksi_mjere,
-  Ukupno_semantic = count_all_semantic
-)]
-writeData(wb, "Semanticke_kategorije", semantic_export)
-addStyle(wb, "Semanticke_kategorije", header_style, rows = 1, cols = 1:ncol(semantic_export))
-setColWidths(wb, "Semanticke_kategorije", cols = 1:ncol(semantic_export), widths = "auto")
-
-output_path <- here("output", "gimes_komponente_indeksa.xlsx")
-dir.create(here("output"), showWarnings = FALSE, recursive = TRUE)
-saveWorkbook(wb, output_path, overwrite = TRUE)
-
-message("Excel datoteka spremljena: ", output_path)
-```
-
-# Dinamike različitih frekvencija
-
-U ovoj sekciji se proširuje Y/y perspektiva s alternativnim dinamikama uključujući M/m (mjesec na mjesec) sezonski prilagođene stope te 3M i 6M anualizirane stope.
-
-## Sezonska prilagodba
-
-Sezonska prilagodba se provodi korištenjem STL (Seasonal and Trend decomposition using Loess) dekompozicije. STL metoda je robustnija za kratke serije s volatilnim podacima u usporedbi s klasičnim pristupima.
-
-::: {.callout-note collapse="true" title="Tehnička metodologija sezonske prilagodbe"}
-
-**STL dekompozicija:**
-
-Vremenska serija $Y_t$ se rastavlja na tri komponente:
+**Formula za mjesečnu volatilnost:**
 
 $$
-Y_t = T_t + S_t + R_t
+\sigma_m = \sqrt{\frac{1}{n_m - 1} \sum_{d \in m} (N_d - \bar{N}_m)^2}
 $$
 
 gdje je:
 
-- $T_t$ = trend komponenta
-- $S_t$ = sezonska komponenta
-- $R_t$ = ostatak (residual)
+- $\sigma_m$ = standardna devijacija broja članaka u mjesecu $m$
+- $N_d$ = broj članaka na dan $d$
+- $\bar{N}_m$ = prosječni dnevni broj članaka u mjesecu $m$
+- $n_m$ = broj dana u mjesecu
 
-**Sezonski prilagođena serija:**
+**Normalizacija:**
 
-$$
-Y_{SA,t} = T_t + R_t = Y_t - S_t
-$$
-
-**Prednosti STL metode:**
-
-- Robustna na outliere
-- Prikladna za kratke serije
-- Fleksibilna kontrola glatkoće trenda i sezonske komponente
-
-**Anualizirana stopa:**
+Za usporedivost se volatilnost normalizira na skalu 0 do 100:
 
 $$
-\text{Ann}_t = \left(\left(1 + \frac{r_t}{100}\right)^{n} - 1\right) \times 100
+\text{Vol}_{norm,m} = \frac{\sigma_m - \min(\sigma)}{\max(\sigma) - \min(\sigma)} \times 100
 $$
 
-gdje je $r_t$ periodična stopa promjene, a $n$ broj perioda u godini (npr. 4 za kvartalne podatke).
+**Interpretacija:**
+
+- Niska volatilnost (0 do 30): Stabilno izvještavanje s ujednačenim brojem članaka
+- Srednja volatilnost (30 do 60): Umjerene oscilacije u izvještavanju
+- Visoka volatilnost (60 do 100): Nestabilno izvještavanje, često povezano s kriznim događajima
 
 :::
 
-```{r seasonal-adjustment}
-#| label: seasonal-adjustment
+## Konstrukcija momentuma
 
-gimes_ts <- ts(index_data$gimes_index, 
-               start = c(year(min(index_data$yearmonth)), month(min(index_data$yearmonth))),
-               frequency = 12)
+Momentum se izračunava kao postotna promjena GIMES indeksa u odnosu na prethodni mjesec. Pozitivan momentum indicira rastuću medijsku pozornost, dok negativan momentum indicira opadajuću pozornost.
 
-semantic_ts <- ts(index_data$semantic_total,
-                  start = c(year(min(index_data$yearmonth)), month(min(index_data$yearmonth))),
-                  frequency = 12)
+::: {.callout-note collapse="true" title="Tehnička metodologija izračuna momentuma"}
 
-volume_ts <- ts(index_data$volume,
-                start = c(year(min(index_data$yearmonth)), month(min(index_data$yearmonth))),
-                frequency = 12)
+**Formula za mjesečni momentum:**
 
-stl_gimes <- tryCatch({
-  stl(gimes_ts, s.window = "periodic", robust = TRUE)
-}, error = function(e) {
-  message("STL dekompozicija za GIMES nije uspjela: ", e$message)
-  NULL
-})
+$$
+\text{Mom}_t = \frac{\text{GIMES}_t - \text{GIMES}_{t-1}}{\text{GIMES}_{t-1}} \times 100
+$$
 
-stl_semantic <- tryCatch({
-  stl(semantic_ts, s.window = "periodic", robust = TRUE)
-}, error = function(e) {
-  message("STL dekompozicija za semantički indeks nije uspjela: ", e$message)
-  NULL
-})
+**3-mjesečni momentum:**
 
-stl_volume <- tryCatch({
-  stl(volume_ts, s.window = "periodic", robust = TRUE)
-}, error = function(e) {
-  message("STL dekompozicija za volumen nije uspjela: ", e$message)
-  NULL
-})
+Za stabilniju procjenu smjera trenda se koristi 3-mjesečni momentum:
 
-if(!is.null(stl_gimes)) {
-  index_data[, gimes_sa := as.numeric(seasadj(stl_gimes))]
-} else {
-  index_data[, gimes_sa := gimes_index]
-}
+$$
+\text{Mom}_{3M,t} = \frac{\text{GIMES}_t - \text{GIMES}_{t-3}}{\text{GIMES}_{t-3}} \times 100
+$$
 
-if(!is.null(stl_semantic)) {
-  index_data[, semantic_sa := as.numeric(seasadj(stl_semantic))]
-} else {
-  index_data[, semantic_sa := semantic_total]
-}
+**Anualizirani momentum:**
 
-if(!is.null(stl_volume)) {
-  index_data[, volume_sa := as.numeric(seasadj(stl_volume))]
-} else {
-  index_data[, volume_sa := volume]
-}
+Za usporedbu s godišnjim stopama se koristi anualizirani 3-mjesečni momentum:
+
+$$
+\text{Mom}_{ann,t} = \left(\left(1 + \frac{\text{Mom}_{3M,t}}{100}\right)^4 - 1\right) \times 100
+$$
+
+**Interpretacija:**
+
+| Vrijednost | Interpretacija |
+|------------|----------------|
+| > 20% | Snažan rastući trend medijske pozornosti |
+| 5% do 20% | Umjeren rastući trend |
+| -5% do 5% | Stabilno razdoblje |
+| -20% do -5% | Umjeren padajući trend |
+| < -20% | Snažan padajući trend (normalizacija) |
+
+:::
+
+```{r volatility-momentum}
+#| label: volatility-momentum
+
+# Dnevna volatilnost po mjesecima
+daily_by_month <- dt[, .(N = .N), by = .(yearmonth, date)]
+volatility <- daily_by_month[, .(
+  volatility = sd(N, na.rm = TRUE),
+  mean_daily = mean(N, na.rm = TRUE),
+  days = .N
+), by = yearmonth]
+
+index_data <- merge(index_data, volatility, by = "yearmonth", all.x = TRUE)
+index_data[, volatility_norm := normalize(volatility)]
+
+# Momentum
+index_data[, `:=`(
+  momentum_1m = (gimes_index / shift(gimes_index, 1) - 1) * 100,
+  momentum_3m = (gimes_index / shift(gimes_index, 3) - 1) * 100
+)]
 ```
 
-## Vizualizacija sezonske komponente
+```{r volatility-plot}
+#| label: volatility-plot
+#| fig-cap: "Volatilnost medijskog izvještavanja"
+#| fig-height: 6
 
-```{r seasonal-decomposition-plot}
-#| label: seasonal-decomposition-plot
-#| fig-cap: "STL dekompozicija GIMES indeksa"
-#| fig-height: 10
-
-if(!is.null(stl_gimes)) {
-  decomp_df <- data.table(
-    yearmonth = index_data$yearmonth,
-    Original = as.numeric(gimes_ts),
-    Trend = as.numeric(stl_gimes$time.series[, "trend"]),
-    Sezonska = as.numeric(stl_gimes$time.series[, "seasonal"]),
-    Ostatak = as.numeric(stl_gimes$time.series[, "remainder"]),
-    SA = as.numeric(seasadj(stl_gimes))
+ggplot(index_data, aes(x = yearmonth)) +
+  geom_col(aes(y = volatility_norm), fill = colors_gimes["warning"], alpha = 0.7) +
+  geom_line(aes(y = gimes_index), color = colors_gimes["primary"], linewidth = 1.2) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  scale_y_continuous(
+    name = "Volatilnost (normalizirana)",
+    sec.axis = sec_axis(~., name = "GIMES Index")
+  ) +
+  labs(
+    title = "Volatilnost medijskog izvještavanja vs GIMES indeks",
+    subtitle = "Stupci = volatilnost (nestabilnost izvještavanja) | Linija = GIMES indeks",
+    x = NULL
   )
-  
-  decomp_long <- melt(decomp_df, id.vars = "yearmonth", 
-                      variable.name = "komponenta", value.name = "vrijednost")
-  
-  ggplot(decomp_long, aes(x = yearmonth, y = vrijednost)) +
-    geom_line(color = colors_gimes["primary"], linewidth = 0.8) +
-    facet_wrap(~komponenta, ncol = 1, scales = "free_y") +
-    scale_x_date(date_breaks = "6 months", date_labels = "%b %Y") +
-    labs(
-      title = "STL dekompozicija GIMES indeksa",
-      subtitle = "Original = Trend + Sezonska + Ostatak | SA = Sezonski prilagođeno (Trend + Ostatak)",
-      x = NULL,
-      y = "Vrijednost"
-    ) +
-    theme(
-      plot.title = element_text(face = "bold"),
-      strip.text = element_text(face = "bold")
-    )
-}
 ```
 
-## Izračun različitih dinamika
+```{r momentum-plot}
+#| label: momentum-plot
+#| fig-cap: "Momentum GIMES indeksa"
+#| fig-height: 6
 
-::: {.callout-note collapse="true" title="Tehnička metodologija izračuna dinamika"}
+ggplot(index_data[!is.na(momentum_3m)], aes(x = yearmonth)) +
+  geom_hline(yintercept = 0, color = "gray50", linetype = "dashed") +
+  geom_col(aes(y = momentum_3m, fill = momentum_3m > 0), show.legend = FALSE) +
+  scale_fill_manual(values = c("TRUE" = colors_gimes["success"], "FALSE" = colors_gimes["secondary"])) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  labs(
+    title = "3-mjesečni momentum GIMES indeksa",
+    subtitle = "Zeleno = rastući trend | Crveno = padajući trend",
+    x = NULL,
+    y = "Momentum (%)"
+  )
+```
 
-**M/M sezonski prilagođena stopa:**
+# Koncentracija tema (Topic Concentration)
+
+U ovoj sekciji se analizira koliko je medijsko izvještavanje koncentrirano na pojedine sektore ili raspoređeno preko više tema. Koncentracijom se mjeri diversifikacija medijskog diskursa o inflaciji.
+
+## Konstrukcija indeksa koncentracije
+
+Koncentracija tema se izračunava korištenjem Herfindahl-Hirschman indeksa (HHI) primijenjenog na udjele pojedinih sektorskih kategorija u ukupnom broju semantičkih pojmova.
+
+Visoka koncentracija indicira da mediji dominantno izvještavaju o jednom ili nekoliko aspekata inflacije, dok niska koncentracija indicira ravnomjernije pokrivanje svih tema.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija konstrukcije indeksa koncentracije"}
+
+**Herfindahl-Hirschman indeks (HHI):**
 
 $$
-\text{M/M}_{SA,t} = \left(\frac{Y_{SA,t}}{Y_{SA,t-1}} - 1\right) \times 100
+\text{HHI}_m = \sum_{c=1}^{C} s_{c,m}^2
 $$
 
-**Y/Y stopa:**
+gdje je $s_{c,m}$ udio kategorije $c$ u ukupnom broju pojmova u mjesecu $m$:
 
 $$
-\text{Y/Y}_t = \left(\frac{Y_t}{Y_{t-12}} - 1\right) \times 100
+s_{c,m} = \frac{\text{count}_{c,m}}{\sum_{c=1}^{C} \text{count}_{c,m}}
 $$
 
-**3M anualizirana stopa:**
+**Normalizacija na skalu 0 do 100:**
+
+HHI se kreće između $1/C$ (savršena diversifikacija) i 1 (potpuna koncentracija). Za interpretabilnost se normalizira:
 
 $$
-\text{3M}_{ann,t} = \left(\left(1 + \frac{\bar{Y}_{SA,t:t-2} / \bar{Y}_{SA,t-3:t-5} - 1}{100}\right)^4 - 1\right) \times 100
+\text{Conc}_{norm,m} = \frac{\text{HHI}_m - 1/C}{1 - 1/C} \times 100
 $$
 
-**6M anualizirana stopa:**
+**Interpretacija:**
 
-$$
-\text{6M}_{ann,t} = \left(\left(1 + \frac{\bar{Y}_{SA,t:t-5} / \bar{Y}_{SA,t-6:t-11} - 1}{100}\right)^2 - 1\right) \times 100
-$$
+| Vrijednost | Interpretacija |
+|------------|----------------|
+| 0 do 20 | Vrlo diversificirano izvještavanje (sve teme podjednako zastupljene) |
+| 20 do 40 | Umjerena diversifikacija |
+| 40 do 60 | Umjerena koncentracija |
+| 60 do 80 | Visoka koncentracija (nekoliko dominantnih tema) |
+| 80 do 100 | Vrlo visoka koncentracija (jedna dominantna tema) |
+
+**Primjena:**
+
+- Niska koncentracija sugerira širu javnu raspravu o različitim aspektima inflacije
+- Visoka koncentracija može indicirati fokus na specifičnu krizu (npr. energetska kriza)
 
 :::
 
-```{r calculate-dynamics}
-#| label: calculate-dynamics
+```{r topic-concentration}
+#| label: topic-concentration
 
-annualize_rate <- function(rate, periods_per_year) {
-  ((1 + rate/100)^periods_per_year - 1) * 100
-}
-
-index_data[, `:=`(
-  gimes_mom_sa = (gimes_sa / shift(gimes_sa, 1) - 1) * 100,
-  semantic_mom_sa = (semantic_sa / shift(semantic_sa, 1) - 1) * 100,
-  volume_mom_sa = (volume_sa / shift(volume_sa, 1) - 1) * 100,
-  
-  gimes_yoy_pct = (gimes_index / shift(gimes_index, 12) - 1) * 100,
-  semantic_yoy_pct = (semantic_total / shift(semantic_total, 12) - 1) * 100,
-  volume_yoy_pct = (volume / shift(volume, 12) - 1) * 100
+# Izračun udjela svake kategorije
+concentration_data <- monthly_semantic[, .(
+  yearmonth,
+  s_inflacija = count_inflacija_direktno / count_all_semantic,
+  s_cijene = count_cijene_poskupljenja / count_all_semantic,
+  s_troskovi = count_troskovi_zivota / count_all_semantic,
+  s_energija = count_energija_gorivo / count_all_semantic,
+  s_hrana = count_hrana / count_all_semantic,
+  s_monetarna = count_monetarna_politika / count_all_semantic,
+  s_place = count_place_primanja / count_all_semantic,
+  s_indeksi = count_indeksi_mjere / count_all_semantic
 )]
 
-index_data[, `:=`(
-  gimes_3m_avg = frollmean(gimes_sa, n = 3, align = "right"),
-  semantic_3m_avg = frollmean(semantic_sa, n = 3, align = "right"),
-  volume_3m_avg = frollmean(volume_sa, n = 3, align = "right")
-)]
+# HHI izračun
+concentration_data[, HHI := s_inflacija^2 + s_cijene^2 + s_troskovi^2 + s_energija^2 +
+                           s_hrana^2 + s_monetarna^2 + s_place^2 + s_indeksi^2]
 
-index_data[, `:=`(
-  gimes_3m_prev = shift(gimes_3m_avg, 3),
-  semantic_3m_prev = shift(semantic_3m_avg, 3),
-  volume_3m_prev = shift(volume_3m_avg, 3)
-)]
+# Normalizacija (8 kategorija, min HHI = 1/8 = 0.125)
+concentration_data[, concentration_norm := (HHI - 0.125) / (1 - 0.125) * 100]
 
-index_data[, `:=`(
-  gimes_3m_ann = annualize_rate((gimes_3m_avg / gimes_3m_prev - 1) * 100, 4),
-  semantic_3m_ann = annualize_rate((semantic_3m_avg / semantic_3m_prev - 1) * 100, 4),
-  volume_3m_ann = annualize_rate((volume_3m_avg / volume_3m_prev - 1) * 100, 4)
-)]
-
-index_data[, `:=`(
-  gimes_6m_avg = frollmean(gimes_sa, n = 6, align = "right"),
-  semantic_6m_avg = frollmean(semantic_sa, n = 6, align = "right"),
-  volume_6m_avg = frollmean(volume_sa, n = 6, align = "right")
-)]
-
-index_data[, `:=`(
-  gimes_6m_prev = shift(gimes_6m_avg, 6),
-  semantic_6m_prev = shift(semantic_6m_avg, 6),
-  volume_6m_prev = shift(volume_6m_avg, 6)
-)]
-
-index_data[, `:=`(
-  gimes_6m_ann = annualize_rate((gimes_6m_avg / gimes_6m_prev - 1) * 100, 2),
-  semantic_6m_ann = annualize_rate((semantic_6m_avg / semantic_6m_prev - 1) * 100, 2),
-  volume_6m_ann = annualize_rate((volume_6m_avg / volume_6m_prev - 1) * 100, 2)
-)]
+index_data <- merge(index_data, concentration_data[, .(yearmonth, HHI, concentration_norm)], 
+                    by = "yearmonth", all.x = TRUE)
 ```
 
-## Usporedba različitih dinamika GIMES indeksa
+```{r concentration-plot}
+#| label: concentration-plot
+#| fig-cap: "Koncentracija tema u medijskom izvještavanju"
+#| fig-height: 6
 
-Na sljedećim grafikonima se prikazuju različite dinamike GIMES indeksa: godina-na-godinu (Y/Y), mjesec-na-mjesec sezonski prilagođeno (M/M SA), te 3-mjesečna i 6-mjesečna anualizirana sezonski prilagođena stopa.
+ggplot(index_data, aes(x = yearmonth)) +
+  geom_ribbon(aes(ymin = 0, ymax = concentration_norm), fill = colors_gimes["purple"], alpha = 0.3) +
+  geom_line(aes(y = concentration_norm), color = colors_gimes["purple"], linewidth = 1.2) +
+  geom_hline(yintercept = c(20, 40, 60), linetype = "dotted", color = "gray60") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, 20)) +
+  annotate("text", x = max(index_data$yearmonth) - 90, y = 10, 
+           label = "Diversificirano", color = "gray50", size = 3, fontface = "italic") +
+  annotate("text", x = max(index_data$yearmonth) - 90, y = 50, 
+           label = "Umjereno", color = "gray50", size = 3, fontface = "italic") +
+  annotate("text", x = max(index_data$yearmonth) - 90, y = 80, 
+           label = "Koncentrirano", color = "gray50", size = 3, fontface = "italic") +
+  labs(
+    title = "Koncentracija tema u medijskom izvještavanju o inflaciji",
+    subtitle = "HHI-based indeks | Niže vrijednosti = diversificiraniji diskurs",
+    x = NULL,
+    y = "Koncentracija (0 do 100)"
+  )
+```
 
-```{r dynamics-comparison}
-#| label: dynamics-comparison
-#| fig-cap: "Usporedba različitih dinamika GIMES indeksa"
+# Pregled svih indeksa
+
+U ovoj sekciji se prikazuje usporedni pregled svih konstruiranih indeksa na jednom grafikonu. Time se omogućuje usporedba dinamika različitih aspekata medijskog izvještavanja.
+
+```{r all-indices-plot}
+#| label: all-indices-plot
+#| fig-cap: "Pregled svih konstruiranih indeksa"
 #| fig-height: 10
 
-dynamics_df <- index_data[, .(
-  yearmonth,
-  `Y/Y (%)` = gimes_yoy_pct,
-  `M/M SA (%)` = gimes_mom_sa,
-  `3M ann. SA (%)` = gimes_3m_ann,
-  `6M ann. SA (%)` = gimes_6m_ann
-)]
+all_indices <- melt(
+  index_data[, .(yearmonth, 
+                 `GIMES Index` = gimes_index,
+                 `Volumen (norm.)` = volume_norm,
+                 `Sentiment (inv.)` = 100 - sentiment_norm,
+                 `Volatilnost` = volatility_norm,
+                 `Koncentracija` = concentration_norm,
+                 `Semantički ukupno` = semantic_norm)],
+  id.vars = "yearmonth",
+  variable.name = "indeks",
+  value.name = "vrijednost"
+)
 
-dynamics_long <- melt(dynamics_df, id.vars = "yearmonth",
-                      variable.name = "dinamika", value.name = "stopa")
-
-ggplot(dynamics_long[!is.na(stopa)], aes(x = yearmonth, y = stopa, color = dinamika)) +
-  geom_hline(yintercept = 0, color = "gray50", linetype = "dashed") +
+ggplot(all_indices, aes(x = yearmonth, y = vrijednost, color = indeks)) +
   geom_line(linewidth = 1) +
-  facet_wrap(~dinamika, ncol = 2, scales = "free_y") +
+  geom_point(size = 1.5, alpha = 0.6) +
+  facet_wrap(~indeks, ncol = 2, scales = "fixed") +
   scale_x_date(date_breaks = "6 months", date_labels = "%b %y") +
+  scale_y_continuous(limits = c(0, 100)) +
   scale_color_manual(values = c(
-    "Y/Y (%)" = colors_gimes["primary"],
-    "M/M SA (%)" = colors_gimes["accent"],
-    "3M ann. SA (%)" = colors_gimes["success"],
-    "6M ann. SA (%)" = colors_gimes["warning"]
+    "GIMES Index" = colors_gimes["primary"],
+    "Volumen (norm.)" = colors_gimes["accent"],
+    "Sentiment (inv.)" = colors_gimes["secondary"],
+    "Volatilnost" = colors_gimes["warning"],
+    "Koncentracija" = colors_gimes["purple"],
+    "Semantički ukupno" = colors_gimes["success"]
   )) +
   labs(
-    title = "Usporedba različitih dinamika GIMES indeksa",
-    subtitle = "Y/Y = godina na godinu | M/M SA = mjesec na mjesec sezonski prilagođeno | XM ann. SA = X-mjesečna anualizirana SA",
+    title = "Pregled svih konstruiranih indeksa medijske inflacije",
+    subtitle = "Svi indeksi normalizirani na skalu 0 do 100",
     x = NULL,
-    y = "Promjena (%)",
+    y = "Vrijednost indeksa",
     color = NULL
   ) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    legend.position = "none",
-    strip.text = element_text(face = "bold"),
-    axis.text.x = element_text(angle = 45, hjust = 1)
-  )
-```
-
-## Tablica dinamika
-
-```{r dynamics-table}
-#| label: dynamics-table
-
-dynamics_table <- index_data[, .(
-  Mjesec = format(yearmonth, "%b %Y"),
-  GIMES = round(gimes_index, 1),
-  `GIMES SA` = round(gimes_sa, 1),
-  `Y/Y (%)` = round(gimes_yoy_pct, 1),
-  `M/M SA (%)` = round(gimes_mom_sa, 1),
-  `3M ann. (%)` = round(gimes_3m_ann, 1),
-  `6M ann. (%)` = round(gimes_6m_ann, 1)
-)]
-
-kable(tail(dynamics_table, 12), 
-      caption = "Dinamike GIMES indeksa - zadnjih 12 mjeseci",
-      align = c("l", rep("r", 6))) %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-  row_spec(0, bold = TRUE, background = colors_gimes["primary"], color = "white")
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
 # Validacija sa službenim podacima
@@ -1547,17 +1421,35 @@ kable(tail(dynamics_table, 12),
 ```{r load-official-data}
 #| label: load-official-data
 
-message("Dohvaćanje HICP podataka iz Eurostata...")
+eurostat_headline <- NULL
+tryCatch({
+  hicp_data <- get_eurostat("prc_hicp_manr", 
+                            filters = list(geo = "HR", 
+                                          coicop = "CP00",
+                                          unit = "RCH_A"),
+                            time_format = "date")
+  setDT(hicp_data)
+  eurostat_headline <- hicp_data[time >= "2021-01-01" & time <= "2024-11-01", 
+                                   .(yearmonth = time, eurostat_hicp = values)]
+}, error = function(e) {
+  eurostat_headline <<- data.table(
+    yearmonth = seq(as.Date("2021-01-01"), as.Date("2024-11-01"), by = "month"),
+    eurostat_hicp = c(
+      0.2, 0.6, 0.8, 1.9, 2.4, 2.3, 2.6, 3.0, 3.3, 3.8, 4.8, 5.5,
+      5.8, 6.3, 7.3, 9.4, 10.8, 12.1, 12.3, 12.4, 12.8, 13.0, 13.0, 12.7,
+      12.0, 11.1, 10.5, 9.2, 8.4, 8.2, 7.3, 7.7, 7.1, 5.3, 4.9, 4.7,
+      4.3, 4.0, 3.9, 3.7, 3.6, 3.4, 3.2, 2.9, 2.8, 2.6, 2.4
+    )
+  )
+})
 
 eurostat_core <- NULL
-
 tryCatch({
   core_data <- get_eurostat("prc_hicp_manr",
                            filters = list(geo = "HR",
                                          coicop = "CP00XEF",
                                          unit = "RCH_A"),
                            time_format = "date")
-  
   setDT(core_data)
   eurostat_core <<- core_data[time >= "2021-01-01" & time <= "2024-11-01",
                               .(yearmonth = time, eurostat_core = values)]
@@ -1573,87 +1465,86 @@ tryCatch({
   )
 })
 
-dzs_inflation <- data.table(
-  yearmonth = seq(as.Date("2021-01-01"), as.Date("2024-11-01"), by = "month"),
-  dzs_cpi = c(
-    0.1, 0.5, 0.7, 1.8, 2.3, 2.2, 2.5, 2.9, 3.2, 3.7, 4.7, 5.4,
-    5.7, 6.2, 7.2, 9.3, 10.7, 12.0, 12.2, 12.3, 12.7, 12.9, 12.9, 12.6,
-    11.9, 11.0, 10.4, 9.1, 8.3, 8.1, 7.2, 7.6, 7.0, 5.2, 4.8, 4.6,
-    4.2, 3.9, 3.8, 3.6, 3.5, 3.3, 3.1, 2.8, 2.7, 2.5, 2.3
-  )
-)
-
 comparison <- merge(index_data, eurostat_headline, by = "yearmonth", all.x = TRUE)
 comparison <- merge(comparison, eurostat_core, by = "yearmonth", all.x = TRUE)
-comparison <- merge(comparison, dzs_inflation, by = "yearmonth", all.x = TRUE)
 ```
 
-## GIMES vs DZS CPI
+## GIMES vs Eurostat HICP
 
-```{r gimes-vs-dzs}
-#| label: gimes-vs-dzs
-#| fig-cap: "GIMES indeks vs DZS CPI inflacija"
+```{r gimes-vs-hicp}
+#| label: gimes-vs-hicp
+#| fig-cap: "GIMES indeks vs Eurostat HICP inflacija"
 #| fig-height: 7
 
-coef_dzs <- 100 / max(comparison$dzs_cpi, na.rm = TRUE)
+coef_hicp <- 100 / max(comparison$eurostat_hicp, na.rm = TRUE)
 
 ggplot(comparison, aes(x = yearmonth)) +
   geom_line(aes(y = gimes_index, color = "GIMES Index"), linewidth = 1.2) +
   geom_point(aes(y = gimes_index), color = colors_gimes["primary"], size = 2, alpha = 0.6) +
-  geom_line(aes(y = dzs_cpi * coef_dzs, color = "DZS CPI"), 
+  geom_line(aes(y = eurostat_hicp * coef_hicp, color = "Eurostat HICP"), 
             linewidth = 1.2, linetype = "solid") +
-  geom_point(aes(y = dzs_cpi * coef_dzs), color = colors_gimes["warning"], 
+  geom_point(aes(y = eurostat_hicp * coef_hicp), color = colors_gimes["secondary"], 
              size = 2, alpha = 0.6) +
   scale_y_continuous(
-    name = "GIMES Index (0-100)",
-    sec.axis = sec_axis(~./coef_dzs, name = "DZS CPI (YoY %)", 
+    name = "GIMES Index (0 do 100)",
+    sec.axis = sec_axis(~./coef_hicp, name = "HICP (YoY %)", 
                        labels = function(x) paste0(x, "%"))
   ) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
   scale_color_manual(values = c("GIMES Index" = colors_gimes["primary"], 
-                                "DZS CPI" = colors_gimes["warning"])) +
+                                "Eurostat HICP" = colors_gimes["secondary"])) +
   labs(
-    title = "GIMES indeks medijske inflacije vs DZS CPI",
-    subtitle = "Usporedba medijske percepcije i službene inflacije (DZS nacionalna metodologija)",
+    title = "GIMES indeks medijske inflacije vs Eurostat HICP",
+    subtitle = "Usporedba medijske percepcije i službene inflacije",
     x = NULL,
     color = NULL
   ) +
   theme(
-    plot.title = element_text(face = "bold", size = 13),
-    plot.subtitle = element_text(size = 10),
-    legend.position = "bottom",
-    axis.title.y.right = element_text(color = colors_gimes["warning"], face = "bold"),
-    axis.text.y.right = element_text(color = colors_gimes["warning"]),
+    axis.title.y.right = element_text(color = colors_gimes["secondary"], face = "bold"),
+    axis.text.y.right = element_text(color = colors_gimes["secondary"]),
     axis.title.y.left = element_text(color = colors_gimes["primary"], face = "bold")
   )
 ```
 
-## Korelacijska matrica
+## Korelacijska matrica indeksa i sektora
 
-Korelacijska matrica prikazuje međusobne odnose između svih konstruiranih indeksa i semantičkih kategorija. Pozitivna korelacija (crvena) ukazuje na to da dva indeksa/kategorije tendiraju rasti i padati zajedno, dok negativna korelacija (plava) ukazuje na obrnuti odnos.
+Na sljedećoj korelacijskoj matrici se prikazuju međusobni odnosi između svih konstruiranih indeksa i sektorskih kategorija. Pozitivna korelacija (crvena) ukazuje na to da dva indeksa tendiraju rasti i padati zajedno, dok negativna korelacija (plava) ukazuje na obrnuti odnos.
 
 ```{r correlation-matrix}
 #| label: correlation-matrix
-#| fig-cap: "Korelacijska matrica indeksa i semantičkih kategorija"
-#| fig-height: 10
+#| fig-cap: "Korelacijska matrica indeksa i sektora"
+#| fig-height: 12
 
-# Pripremi podatke za korelacijsku matricu
-cor_vars <- c("gimes_index", "volume", "semantic_total", 
-              "semantic_inflacija", "semantic_cijene", "semantic_troskovi",
-              "semantic_energija", "semantic_hrana", "semantic_monetarna",
-              "semantic_place", "semantic_indeksi")
-cor_vars <- cor_vars[cor_vars %in% names(index_data)]
+# Spoji sektorske indekse s glavnim indeksima
+cor_data_full <- merge(
+  index_data[, .(yearmonth, gimes_index, volume_norm, 
+                 sentiment_inv = 100 - sentiment_norm, 
+                 volatility_norm, concentration_norm, semantic_norm)],
+  monthly_semantic[, .(yearmonth, idx_inflacija, idx_cijene, idx_troskovi, 
+                       idx_energija, idx_hrana, idx_monetarna, idx_place, idx_indeksi)],
+  by = "yearmonth"
+)
 
-cor_data <- index_data[, .SD, .SDcols = cor_vars]
-cor_matrix <- cor(cor_data, use = "pairwise.complete.obs")
+# Dodaj HICP
+cor_data_full <- merge(cor_data_full, eurostat_headline, by = "yearmonth", all.x = TRUE)
+
+# Pripremi matricu
+cor_vars_full <- c("gimes_index", "volume_norm", "sentiment_inv", "volatility_norm", 
+                   "concentration_norm", "semantic_norm", "eurostat_hicp",
+                   "idx_inflacija", "idx_cijene", "idx_troskovi", "idx_energija",
+                   "idx_hrana", "idx_monetarna", "idx_place", "idx_indeksi")
+
+cor_matrix_full <- cor(cor_data_full[, .SD, .SDcols = cor_vars_full], use = "pairwise.complete.obs")
 
 # Preimenuj za čitljivost
-rownames(cor_matrix) <- gsub("semantic_", "Sem_", rownames(cor_matrix))
-rownames(cor_matrix) <- gsub("gimes_index", "GIMES", rownames(cor_matrix))
-colnames(cor_matrix) <- gsub("semantic_", "Sem_", colnames(cor_matrix))
-colnames(cor_matrix) <- gsub("gimes_index", "GIMES", colnames(cor_matrix))
+nice_names <- c("GIMES", "Volumen", "Sentiment", "Volatilnost", "Koncentracija", 
+                "Sem. ukupno", "HICP",
+                "S: Inflacija", "S: Cijene", "S: Troškovi", "S: Energija",
+                "S: Hrana", "S: Monetarna", "S: Plaće", "S: Indeksi")
+rownames(cor_matrix_full) <- nice_names
+colnames(cor_matrix_full) <- nice_names
 
-corrplot(cor_matrix,
+corrplot(cor_matrix_full,
          method = "color",
          type = "upper",
          order = "hclust",
@@ -1663,7 +1554,38 @@ corrplot(cor_matrix,
          addCoef.col = "black",
          number.cex = 0.5,
          col = colorRampPalette(c(colors_gimes["accent"], "white", colors_gimes["secondary"]))(100),
-         title = "Korelacijska matrica",
+         title = "Korelacijska matrica indeksa i sektora",
+         mar = c(0, 0, 2, 0))
+```
+
+## Korelacije samo između indeksa
+
+```{r correlation-indices-only}
+#| label: correlation-indices-only
+#| fig-cap: "Korelacije između glavnih indeksa"
+#| fig-height: 8
+
+cor_vars_indices <- c("gimes_index", "volume_norm", "sentiment_inv", "volatility_norm", 
+                      "concentration_norm", "semantic_norm", "eurostat_hicp")
+
+cor_matrix_indices <- cor(cor_data_full[, .SD, .SDcols = cor_vars_indices], use = "pairwise.complete.obs")
+
+nice_names_indices <- c("GIMES", "Volumen", "Sentiment (inv.)", "Volatilnost", 
+                        "Koncentracija", "Sem. ukupno", "HICP")
+rownames(cor_matrix_indices) <- nice_names_indices
+colnames(cor_matrix_indices) <- nice_names_indices
+
+corrplot(cor_matrix_indices,
+         method = "color",
+         type = "upper",
+         order = "original",
+         tl.col = "black",
+         tl.srt = 45,
+         tl.cex = 0.9,
+         addCoef.col = "black",
+         number.cex = 0.7,
+         col = colorRampPalette(c(colors_gimes["accent"], "white", colors_gimes["secondary"]))(100),
+         title = "Korelacije između glavnih indeksa",
          mar = c(0, 0, 2, 0))
 ```
 
@@ -1676,22 +1598,24 @@ correlations <- data.table(
   Usporedba = c(
     "GIMES Index vs Eurostat HICP",
     "GIMES Index vs Eurostat Core",
-    "GIMES Index vs DZS CPI",
     "Volumen (broj članaka) vs Eurostat HICP",
     "Semantički indeks (ukupno) vs Eurostat HICP",
-    "Semantički (inflacija direktno) vs Eurostat HICP"
+    "Sentiment (invertiran) vs Eurostat HICP",
+    "Volatilnost vs Eurostat HICP",
+    "Koncentracija vs Eurostat HICP"
   ),
   Korelacija = c(
     round(cor(comparison$gimes_index, comparison$eurostat_hicp, use = "complete.obs"), 3),
     round(cor(comparison$gimes_index, comparison$eurostat_core, use = "complete.obs"), 3),
-    round(cor(comparison$gimes_index, comparison$dzs_cpi, use = "complete.obs"), 3),
     round(cor(comparison$volume, comparison$eurostat_hicp, use = "complete.obs"), 3),
     round(cor(comparison$semantic_total, comparison$eurostat_hicp, use = "complete.obs"), 3),
-    round(cor(comparison$semantic_inflacija, comparison$eurostat_hicp, use = "complete.obs"), 3)
+    round(cor(100 - comparison$sentiment_norm, comparison$eurostat_hicp, use = "complete.obs"), 3),
+    round(cor(comparison$volatility_norm, comparison$eurostat_hicp, use = "complete.obs"), 3),
+    round(cor(comparison$concentration_norm, comparison$eurostat_hicp, use = "complete.obs"), 3)
   )
 )
 
-kable(correlations, caption = "Korelacije između različitih mjera inflacije") %>%
+kable(correlations, caption = "Korelacije između indeksa i službene inflacije") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
   row_spec(which.max(correlations$Korelacija), bold = TRUE, background = colors_gimes["success"])
 ```
@@ -1700,7 +1624,7 @@ kable(correlations, caption = "Korelacije između različitih mjera inflacije") 
 
 ## Cross-correlation analiza
 
-Unakrsna korelacijska analiza se koristi za ispitivanje lead/lag odnosa između GIMES indeksa i službene inflacije. Negativan pomak ukazuje na to da GIMES predvodi inflaciju, dok pozitivan pomak ukazuje na to da GIMES prati inflaciju.
+Unakrsnom korelacijskom analizom se ispituju lead/lag odnosi između GIMES indeksa i službene inflacije. Negativan pomak ukazuje na to da GIMES predvodi inflaciju, dok pozitivan pomak ukazuje na to da GIMES prati inflaciju.
 
 ::: {.callout-note collapse="true" title="Tehnička metodologija cross-correlation analize"}
 
@@ -1763,8 +1687,7 @@ if(nrow(comparison_complete) >= 24) {
       subtitle = "Negativni pomak = GIMES predvodi inflaciju | Pozitivni pomak = GIMES prati inflaciju",
       x = "Pomak (mjeseci)",
       y = "Korelacija"
-    ) +
-    theme(plot.title = element_text(face = "bold"))
+    )
 }
 ```
 
@@ -1815,11 +1738,131 @@ kable(lag_table,
   row_spec(which.max(lag_table$Korelacija), bold = TRUE, background = colors_gimes["success"])
 ```
 
+# Sezonska prilagodba i dinamike
+
+U ovoj sekciji se proširuje Y/y perspektiva s alternativnim dinamikama uključujući M/m (mjesec na mjesec) sezonski prilagođene stope te 3M i 6M anualizirane stope.
+
+## Sezonska prilagodba
+
+Sezonska prilagodba se provodi korištenjem STL (Seasonal and Trend decomposition using Loess) dekompozicije.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija sezonske prilagodbe"}
+
+**STL dekompozicija:**
+
+Vremenska serija $Y_t$ se rastavlja na tri komponente:
+
+$$
+Y_t = T_t + S_t + R_t
+$$
+
+gdje je:
+
+- $T_t$ = trend komponenta
+- $S_t$ = sezonska komponenta
+- $R_t$ = ostatak (residual)
+
+**Sezonski prilagođena serija:**
+
+$$
+Y_{SA,t} = T_t + R_t = Y_t - S_t
+$$
+
+**M/M sezonski prilagođena stopa:**
+
+$$
+\text{M/M}_{SA,t} = \left(\frac{Y_{SA,t}}{Y_{SA,t-1}} - 1\right) \times 100
+$$
+
+**Anualizirana stopa:**
+
+$$
+\text{Ann}_t = \left(\left(1 + \frac{r_t}{100}\right)^{n} - 1\right) \times 100
+$$
+
+gdje je $r_t$ periodična stopa promjene, a $n$ broj perioda u godini.
+
+:::
+
+```{r seasonal-adjustment}
+#| label: seasonal-adjustment
+
+gimes_ts <- ts(index_data$gimes_index, 
+               start = c(year(min(index_data$yearmonth)), month(min(index_data$yearmonth))),
+               frequency = 12)
+
+stl_gimes <- tryCatch({
+  stl(gimes_ts, s.window = "periodic", robust = TRUE)
+}, error = function(e) NULL)
+
+if(!is.null(stl_gimes)) {
+  index_data[, gimes_sa := as.numeric(seasadj(stl_gimes))]
+} else {
+  index_data[, gimes_sa := gimes_index]
+}
+
+# Izračun dinamika
+annualize_rate <- function(rate, periods_per_year) {
+  ((1 + rate/100)^periods_per_year - 1) * 100
+}
+
+index_data[, `:=`(
+  gimes_mom_sa = (gimes_sa / shift(gimes_sa, 1) - 1) * 100,
+  gimes_yoy_pct = (gimes_index / shift(gimes_index, 12) - 1) * 100
+)]
+
+index_data[, gimes_3m_avg := frollmean(gimes_sa, n = 3, align = "right")]
+index_data[, gimes_3m_prev := shift(gimes_3m_avg, 3)]
+index_data[, gimes_3m_ann := annualize_rate((gimes_3m_avg / gimes_3m_prev - 1) * 100, 4)]
+
+index_data[, gimes_6m_avg := frollmean(gimes_sa, n = 6, align = "right")]
+index_data[, gimes_6m_prev := shift(gimes_6m_avg, 6)]
+index_data[, gimes_6m_ann := annualize_rate((gimes_6m_avg / gimes_6m_prev - 1) * 100, 2)]
+```
+
+```{r dynamics-comparison}
+#| label: dynamics-comparison
+#| fig-cap: "Usporedba različitih dinamika GIMES indeksa"
+#| fig-height: 10
+
+dynamics_df <- index_data[, .(
+  yearmonth,
+  `Y/Y (%)` = gimes_yoy_pct,
+  `M/M SA (%)` = gimes_mom_sa,
+  `3M ann. SA (%)` = gimes_3m_ann,
+  `6M ann. SA (%)` = gimes_6m_ann
+)]
+
+dynamics_long <- melt(dynamics_df, id.vars = "yearmonth",
+                      variable.name = "dinamika", value.name = "stopa")
+
+ggplot(dynamics_long[!is.na(stopa)], aes(x = yearmonth, y = stopa, color = dinamika)) +
+  geom_hline(yintercept = 0, color = "gray50", linetype = "dashed") +
+  geom_line(linewidth = 1) +
+  facet_wrap(~dinamika, ncol = 2, scales = "free_y") +
+  scale_x_date(date_breaks = "6 months", date_labels = "%b %y") +
+  scale_color_manual(values = c(
+    "Y/Y (%)" = colors_gimes["primary"],
+    "M/M SA (%)" = colors_gimes["accent"],
+    "3M ann. SA (%)" = colors_gimes["success"],
+    "6M ann. SA (%)" = colors_gimes["warning"]
+  )) +
+  labs(
+    title = "Usporedba različitih dinamika GIMES indeksa",
+    subtitle = "Y/Y = godina na godinu | M/M SA = mjesec na mjesec sezonski prilagođeno | XM ann. SA = X-mjesečna anualizirana SA",
+    x = NULL,
+    y = "Promjena (%)",
+    color = NULL
+  ) +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
 # Zaključci i implikacije
 
 ## Ključni nalazi
 
-U ovoj analizi je konstruiran GIMES indeks medijske inflacije te je provedena validacija s službenim podacima o inflaciji. Analiza semantičkih pojmova je pokazala koje kategorije najbolje prate službenu inflaciju.
+U ovoj analizi je konstruiran GIMES indeks medijske inflacije te je provedena validacija s službenim podacima o inflaciji. Analizom semantičkih pojmova je pokazano koje kategorije najbolje prate službenu inflaciju.
 
 ```{r summary-findings}
 #| label: summary-findings
@@ -1829,8 +1872,6 @@ peak_value <- index_data[which.max(gimes_index), gimes_index]
 
 peak_inflation_month <- comparison[which.max(eurostat_hicp), yearmonth]
 peak_inflation_value <- comparison[which.max(eurostat_hicp), eurostat_hicp]
-
-best_semantic <- correlation_results[Kategorija != "SVE KATEGORIJE"][which.max(Korelacija)]
 
 findings <- data.table(
   Nalaz = c(
@@ -1844,9 +1885,8 @@ findings <- data.table(
     "Vrh inflacije (HICP)",
     "Vrijednost vrha",
     "",
-    "Korelacija GIMES-HICP",
-    "Korelacija Semantički-HICP",
-    "Najbolja semantička kategorija",
+    "Korelacija GIMES vs HICP",
+    "Korelacija Semantički vs HICP",
     "Optimalni pomak",
     "",
     "Prosječna duljina članka",
@@ -1865,7 +1905,6 @@ findings <- data.table(
     "",
     round(cor(comparison$gimes_index, comparison$eurostat_hicp, use = "complete.obs"), 3),
     round(cor(comparison$semantic_total, comparison$eurostat_hicp, use = "complete.obs"), 3),
-    paste0(best_semantic$Kategorija, " (r=", best_semantic$Korelacija, ")"),
     paste0(lags[which.max(abs(correlations_lag))], " mjeseci"),
     "",
     paste0(format(round(median(dt$text_length)), big.mark = ","), " znakova"),
@@ -1876,66 +1915,61 @@ findings <- data.table(
 
 kable(findings, caption = "Sažetak ključnih nalaza analize") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
-  row_spec(c(4, 7, 10, 15), background = colors_gimes["light"])
+  row_spec(c(4, 7, 10, 14), background = colors_gimes["light"])
 ```
 
-## Finalni export u Excel
+## Export komponenti indeksa u Excel
 
-```{r final-export}
-#| label: final-export
+```{r export-components-excel}
+#| label: export-components-excel
 
-dynamics_export <- index_data[, .(
+export_data <- index_data[, .(
   Datum = yearmonth,
-  GIMES_original = round(gimes_index, 2),
-  GIMES_SA = round(gimes_sa, 2),
-  GIMES_YoY = round(gimes_yoy_pct, 2),
-  GIMES_MoM_SA = round(gimes_mom_sa, 2),
-  GIMES_3M_ann = round(gimes_3m_ann, 2),
-  GIMES_6M_ann = round(gimes_6m_ann, 2),
-  Semantic_original = semantic_total,
-  Semantic_SA = round(semantic_sa, 0),
-  Semantic_YoY = round(semantic_yoy_pct, 2),
-  Volume_original = volume,
-  Volume_SA = round(volume_sa, 0),
-  Volume_YoY = round(volume_yoy_pct, 2)
+  Godina = year(yearmonth),
+  Mjesec = month(yearmonth),
+  Broj_clanaka = volume,
+  Prosjecna_duljina = round(avg_length, 0),
+  Prosjecni_sentiment = round(avg_sentiment, 3),
+  Prosjecni_reach = round(avg_reach, 0),
+  Semantic_ukupno = semantic_total,
+  Semantic_inflacija = semantic_inflacija,
+  Semantic_cijene = semantic_cijene,
+  Semantic_troskovi = semantic_troskovi,
+  Semantic_energija = semantic_energija,
+  Semantic_hrana = semantic_hrana,
+  Semantic_monetarna = semantic_monetarna,
+  Semantic_place = semantic_place,
+  Semantic_indeksi = semantic_indeksi,
+  Volume_norm = round(volume_norm, 2),
+  Length_norm = round(length_norm, 2),
+  Sentiment_norm = round(sentiment_norm, 2),
+  Sentiment_inv = round(100 - sentiment_norm, 2),
+  Reach_norm = round(reach_norm, 2),
+  Semantic_norm = round(semantic_norm, 2),
+  Volatility_norm = round(volatility_norm, 2),
+  Concentration_norm = round(concentration_norm, 2),
+  GIMES_index = round(gimes_index, 2),
+  GIMES_MA3 = round(gimes_index_ma3, 2),
+  GIMES_YoY = round(gimes_yoy, 2)
 )]
 
-addWorksheet(wb, "Dinamike")
-writeData(wb, "Dinamike", dynamics_export)
-addStyle(wb, "Dinamike", header_style, rows = 1, cols = 1:ncol(dynamics_export))
-setColWidths(wb, "Dinamike", cols = 1:ncol(dynamics_export), widths = "auto")
+wb <- createWorkbook()
 
-if(!is.null(stl_gimes)) {
-  seasonal_export <- data.table(
-    Datum = index_data$yearmonth,
-    GIMES_trend = round(as.numeric(stl_gimes$time.series[, "trend"]), 2),
-    GIMES_sezonska = round(as.numeric(stl_gimes$time.series[, "seasonal"]), 2),
-    GIMES_ostatak = round(as.numeric(stl_gimes$time.series[, "remainder"]), 2)
-  )
-  
-  addWorksheet(wb, "Sezonska_dekompozicija")
-  writeData(wb, "Sezonska_dekompozicija", seasonal_export)
-  addStyle(wb, "Sezonska_dekompozicija", header_style, rows = 1, cols = 1:ncol(seasonal_export))
-  setColWidths(wb, "Sezonska_dekompozicija", cols = 1:ncol(seasonal_export), widths = "auto")
-}
+addWorksheet(wb, "Komponente_indeksa")
+writeData(wb, "Komponente_indeksa", export_data)
 
-all_correlations <- rbind(
-  correlation_results[, .(Tip = "Semantička kategorija", Naziv = Kategorija, Korelacija, P_vrijednost)],
-  data.table(
-    Tip = "Indeks",
-    Naziv = c("GIMES vs HICP", "GIMES vs Core", "GIMES vs DZS CPI", "Volumen vs HICP"),
-    Korelacija = correlations$Korelacija,
-    P_vrijednost = NA_real_
-  )
+header_style <- createStyle(
+  textDecoration = "bold",
+  fgFill = "#2C3E50",
+  fontColour = "white",
+  halign = "center"
 )
+addStyle(wb, "Komponente_indeksa", header_style, rows = 1, cols = 1:ncol(export_data))
+setColWidths(wb, "Komponente_indeksa", cols = 1:ncol(export_data), widths = "auto")
 
-addWorksheet(wb, "Korelacije")
-writeData(wb, "Korelacije", all_correlations)
-addStyle(wb, "Korelacije", header_style, rows = 1, cols = 1:ncol(all_correlations))
-setColWidths(wb, "Korelacije", cols = 1:ncol(all_correlations), widths = "auto")
-
+output_path <- here("output", "gimes_komponente_indeksa.xlsx")
+dir.create(here("output"), showWarnings = FALSE, recursive = TRUE)
 saveWorkbook(wb, output_path, overwrite = TRUE)
-message("Finalna Excel datoteka spremljena: ", output_path)
 ```
 
 ---

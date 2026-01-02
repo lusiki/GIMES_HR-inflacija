@@ -128,7 +128,7 @@ Projekt koristi trostupanjski cjevovod:
 
 ---
 
-### 2. Gospodarska aktivnost [izvještaj]()
+### 2. Gospodarska aktivnost [izvještaj](https://raw.githack.com/lusiki/GIMES_HR-inflacija/main/code/03_analysis/report_aktivnost.html)
 
 **Fokus**: Performanse realnog sektora, BDP, industrijska proizvodnja, poslovno povjerenje
 

@@ -27,42 +27,68 @@ lang: hr
 #| label: setup
 #| include: false
 
+# Core data manipulation
 library(data.table)
-library(ggplot2)
-library(scales)
 library(lubridate)
 library(stringi)
+
+# Visualization
+library(ggplot2)
+library(scales)
+library(plotly)
+library(corrplot)
+library(patchwork)
+
+# Tables and output
 library(knitr)
 library(kableExtra)
-library(plotly)
-library(zoo)
 library(openxlsx)
-library(RColorBrewer)
-library(gridExtra)
-library(here)
-library(forecast)
-library(corrplot)
 
-options(scipen = 999)
-theme_set(theme_minimal(base_size = 12))
+# Time series
+library(zoo)
+library(forecast)
+
+# Project management
+library(here)
 
 colors_gimes <- c(
-  "primary" = "#2C3E50",
-  "secondary" = "#C0392B",
-  "accent" = "#2980B9",
-  "success" = "#27AE60",
-  "warning" = "#D35400",
-  "light" = "#ECF0F1",
-  "purple" = "#8E44AD",
-  "left" = "#E74C3C",
-  "right" = "#3498DB",
-  "neutral" = "#95A5A6"
+  "primary"   = "#2C3E50",
+  "secondary" = "#E74C3C",
+  "accent"    = "#3498DB",
+  "success"   = "#27AE60",
+  "warning"   = "#F39C12",
+  "danger"    = "#C0392B",
+  "light"     = "#ECF0F1",
+  "purple"    = "#9B59B6",
+  "teal"      = "#1ABC9C",
+  "muted"     = "#7F8C8D"
 )
+
+# Topic specific colors
+colors_gimes["left"] <- "#E74C3C"
+colors_gimes["right"] <- "#3498DB"
+colors_gimes["neutral"] <- "#95A5A6"
+
+options(scipen = 999)
+
+theme_gimes <- function() {
+  theme_minimal(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", size = 14, color = colors_gimes["primary"]),
+      plot.subtitle = element_text(size = 10, color = "gray40"),
+      panel.grid.minor = element_blank(),
+      legend.position = "bottom",
+      axis.text = element_text(size = 9),
+      strip.text = element_text(face = "bold", size = 10)
+    )
+}
+
+theme_set(theme_gimes())
 ```
 
 # Uvod
 
-U ovom izvještaju se predstavlja sveobuhvatna analiza medijske pokrivenosti političke polarizacije u Hrvatskoj. Analizom se obuhvaća razdoblje prikupljanja članaka iz hrvatskih online medija, a temelji se na naprednoj metodologiji filtriranja koja identificira sadržaje vezane uz društvene podjele, stranačke sukobe, govor mržnje, povijesne traume i sporna društvena pitanja.
+U ovom izvještaju se predstavlja sveobuhvatna analiza medijske pokrivenosti političke polarizacije u Hrvatskoj. Analizom se obuhvaća praćenje društvenih podjela, stranačkih sukoba, govora mržnje, povijesnih trauma i spornih društvenih pitanja temeljem članaka iz hrvatskih online medija.
 
 ## Motivacija i kontekst
 
@@ -75,41 +101,47 @@ Politička polarizacija predstavlja rastući fenomen u suvremenim demokracijama,
 
 ## Struktura izvještaja
 
-U izvještaju se obrađuju sljedeće teme: metodologija identifikacije relevantnih članaka, eksploratorni pregled dataseta, semantička taksonomija polarizacijskih pojmova, konstrukcija specijaliziranih indeksa, vremenske dinamike i međusobne korelacije različitih aspekata polarizacije.
+U izvještaju se obrađuju sljedeće teme: metodologija identifikacije relevantnih članaka, eksploratorni pregled dataseta, semantička taksonomija polarizacijskih pojmova, konstrukcija specijaliziranih indeksa, vizualizacija indeksa, sektorska analiza, sentiment analiza, volatilnost i momentum te koncentracija tema.
 
 ```{r load-data}
 #| label: load-data
 
 #dt <- as.data.table(read.xlsx(here("data", "polarization_filtered.xlsx")))
-dt <- as.data.table(read.xlsx("C:/Users/lsikic/Desktop/polarization_filtered.xlsx"))
+dt <- as.data.table(read.xlsx("C:/Users/lsikic/Desktop/inflacija_filtered.xlsx"))
 
-if(is.numeric(dt$DATE)) {
+# Date conversion
+if (is.numeric(dt$DATE)) {
   dt[, DATE := as.Date(DATE, origin = "1899-12-30")]
 } else {
   dt[, DATE := as.Date(DATE)]
 }
 
-if("text_length" %in% names(dt)) {
-  dt[, text_length := as.numeric(text_length)]
-}
-if("REACH" %in% names(dt)) {
-  dt[, REACH := as.numeric(REACH)]
-}
-if("INTERACTIONS" %in% names(dt)) {
-  dt[, INTERACTIONS := as.numeric(INTERACTIONS)]
-}
+# Numeric conversions
+if ("text_length" %in% names(dt)) dt[, text_length := as.numeric(text_length)]
+if ("REACH" %in% names(dt)) dt[, REACH := as.numeric(REACH)]
+if ("INTERACTIONS" %in% names(dt)) dt[, INTERACTIONS := as.numeric(INTERACTIONS)]
 
+# Time variables (include both weekly and quarterly)
 dt[, `:=`(
   date = DATE,
   year = year(DATE),
   month = month(DATE),
   week = isoweek(DATE),
+  quarter = quarter(DATE),
   yearmonth = floor_date(DATE, "month"),
-  yearweek = floor_date(DATE, "week")
+  yearweek = floor_date(DATE, "week"),
+  yearquarter = floor_date(DATE, "quarter")
 )]
+
+# Store date range
+date_min <- min(dt$date, na.rm = TRUE)
+date_max <- max(dt$date, na.rm = TRUE)
+
+cat("Učitano", format(nrow(dt), big.mark = ","), "članaka\n")
+cat("Vremenski raspon:", format(date_min, "%d.%m.%Y"), "do", format(date_max, "%d.%m.%Y"), "\n")
 ```
 
-# Metodologija identifikacije članaka o polarizaciji
+# Metodologija identifikacije članaka
 
 ## Pregled procesa filtriranja
 
@@ -123,7 +155,7 @@ Odabiru se samo web izvori kako bi se osigurala konzistentnost formata i dostupn
 
 **Filter 2: Relevantni news portali**
 
-Koristi se lista verificiranih hrvatskih news portala kategoriziranih u pet skupina: nacionalni mediji, poslovni mediji, regionalni mediji, specijalizirani mediji i opinion portali. Opinion portali su posebno relevantni za analizu polarizacije.
+Koristi se lista verificiranih hrvatskih news portala kategoriziranih u pet skupina: nacionalni mediji, poslovni mediji, regionalni mediji, specijalizirani mediji i opinion portali.
 
 **Filter 3: Minimalna duljina teksta**
 
@@ -150,8 +182,6 @@ Isključuju se članci o sportu, zabavi i drugim irelevantnim temama, osim ako s
 # Eksploratorni pregled podataka
 
 ## Osnovne statistike
-
-U ovom poglavlju se prikazuju osnovne deskriptivne statistike dataseta.
 
 ```{r basic-stats}
 #| label: basic-stats
@@ -207,10 +237,6 @@ ggplot(cat_summary, aes(x = reorder(source_category, N), y = N, fill = source_ca
     subtitle = "Opinion portali su posebno relevantni za polarizacijski sadržaj",
     x = NULL,
     y = "Broj članaka"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    panel.grid.major.y = element_blank()
   )
 ```
 
@@ -231,10 +257,6 @@ ggplot(top_sources, aes(x = reorder(FROM, N), y = N)) +
     title = "Top 20 izvora po broju članaka o polarizaciji",
     x = NULL,
     y = "Broj članaka"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    panel.grid.major.y = element_blank()
   )
 ```
 
@@ -244,7 +266,7 @@ ggplot(top_sources, aes(x = reorder(FROM, N), y = N)) +
 #| label: text-length
 #| fig-cap: "Distribucija duljine članaka"
 
-if("text_length" %in% names(dt)) {
+if ("text_length" %in% names(dt)) {
   ggplot(dt, aes(x = text_length)) +
     geom_histogram(bins = 50, fill = colors_gimes["primary"], alpha = 0.8, color = "white") +
     geom_vline(xintercept = median(dt$text_length, na.rm = TRUE), 
@@ -260,126 +282,23 @@ if("text_length" %in% names(dt)) {
       subtitle = "Broj znakova u punom tekstu",
       x = "Broj znakova",
       y = "Broj članaka"
-    ) +
-    theme(plot.title = element_text(face = "bold"))
+    )
 }
 ```
 
-# Vremenska analiza
+# Semantička taksonomija
 
-## Dnevna frekvencija članaka o polarizaciji
+## Hijerarhijska struktura pojmova
 
-Na sljedećem grafikonu se prikazuje dnevni broj članaka o polarizaciji s kliznim prosjekom.
-
-```{r daily-frequency}
-#| label: daily-frequency
-#| fig-cap: "Dnevni broj članaka o polarizaciji"
-#| fig-height: 8
-
-daily <- dt[, .(N = .N), by = date][order(date)]
-daily[, MA7 := frollmean(N, n = 7, align = "center")]
-daily[, MA30 := frollmean(N, n = 30, align = "center")]
-
-ggplot(daily, aes(x = date)) +
-  geom_col(aes(y = N), fill = colors_gimes["light"], alpha = 0.5, width = 1) +
-  geom_line(aes(y = MA7, color = "7-dnevni prosjek"), linewidth = 0.8, na.rm = TRUE) +
-  geom_line(aes(y = MA30, color = "30-dnevni prosjek"), linewidth = 1.2, na.rm = TRUE) +
-  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  scale_y_continuous(labels = comma) +
-  scale_color_manual(values = c("7-dnevni prosjek" = colors_gimes["accent"],
-                                "30-dnevni prosjek" = colors_gimes["secondary"])) +
-  labs(
-    title = "Dnevna frekvencija članaka o političkoj polarizaciji",
-    subtitle = "Broj članaka po danu sa kliznim prosjekom",
-    x = NULL,
-    y = "Broj članaka",
-    color = "Klizni prosjek"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold", size = 14),
-    plot.subtitle = element_text(size = 10),
-    legend.position = "bottom",
-    axis.text.x = element_text(size = 9)
-  )
-```
-
-## Mjesečna dinamika
-
-```{r monthly-trend}
-#| label: monthly-trend
-#| fig-cap: "Mjesečni broj članaka o polarizaciji"
-
-monthly <- dt[, .(N = .N), by = yearmonth][order(yearmonth)]
-monthly[, MA3 := frollmean(N, n = 3, align = "center")]
-
-ggplot(monthly, aes(x = yearmonth)) +
-  geom_col(aes(y = N), fill = colors_gimes["primary"], alpha = 0.7, width = 25) +
-  geom_line(aes(y = MA3), color = colors_gimes["secondary"], linewidth = 1.2, na.rm = TRUE) +
-  geom_point(aes(y = MA3), color = colors_gimes["secondary"], size = 2, na.rm = TRUE) +
-  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
-  scale_y_continuous(labels = comma) +
-  labs(
-    title = "Mjesečni broj članaka o polarizaciji",
-    subtitle = "Crvena linija = 3-mjesečni klizni prosjek",
-    x = NULL,
-    y = "Broj članaka"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    axis.text.x = element_text(size = 8)
-  )
-```
-
-## Godišnja usporedba
-
-```{r yearly-comparison}
-#| label: yearly-comparison
-#| fig-cap: "Usporedba mjesečne dinamike po godinama"
-
-yearly_monthly <- dt[, .(N = .N), by = .(year, month)][order(year, month)]
-
-ggplot(yearly_monthly, aes(x = month, y = N, color = factor(year), group = year)) +
-  geom_line(linewidth = 1.2) +
-  geom_point(size = 2.5) +
-  scale_x_continuous(breaks = 1:12, labels = c("Sij", "Velj", "Ožu", "Tra", "Svi", "Lip",
-                                                "Srp", "Kol", "Ruj", "Lis", "Stu", "Pro")) +
-  scale_y_continuous(labels = comma) +
-  scale_color_brewer(palette = "Set1") +
-  labs(
-    title = "Mjesečna dinamika po godinama",
-    x = "Mjesec",
-    y = "Broj članaka",
-    color = "Godina"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    legend.position = "bottom"
-  )
-```
-
-# Semantička taksonomija polarizacijskih pojmova
-
-U ovoj sekciji se definira sveobuhvatna semantička taksonomija za analizu političke polarizacije. Taksonomija se organizira u 12 makro kategorija koje obuhvaćaju različite aspekte polarizacijskog diskursa u hrvatskom kontekstu.
-
-## Definicija semantičkog rječnika
-
-Semantički rječnik se temelji na pojmovima identificiranima u procesu filtriranja članaka. Pojmovi se definiraju pomoću korijena riječi (stem) kako bi se osigurala šira morfološka pokrivenost hrvatskog jezika.
+Semantička taksonomija se organizira u 12 makro kategorija koje obuhvaćaju različite aspekte polarizacijskog diskursa u hrvatskom kontekstu. Pojmovi se definiraju pomoću korijena riječi (stem) kako bi se osigurala šira morfološka pokrivenost hrvatskog jezika.
 
 ::: {.callout-note collapse="true" title="Detaljna metodologija semantičke taksonomije"}
 
 **Princip konstrukcije rječnika:**
 
-1. **Kategorije** predstavljaju konceptualno različite aspekte polarizacije
-2. **Regex uzorci** se koriste za fleksibilno prepoznavanje morfoloških varijanti
-3. **Korijenski oblici** osiguravaju prepoznavanje svih padežnih i glagolskih oblika
-
-**Morfološka pokrivenost:**
-
-Za hrvatski jezik koji ima bogatu morfologiju, koriste se:
-
-- Korijenski oblici s opcionalnim nastavcima: `polarizacij[a-zčćžšđ]*` prepoznaje polarizacija, polarizacijski, polarizacijom...
-- Alternativni oblici za palatalizaciju: `[sš]`, `[cč]`, `[zž]`
-- Wildcard znakovi: `.{0,15}` dopušta do 15 bilo kojih znakova između riječi
+1. Kategorije predstavljaju konceptualno različite aspekte polarizacije
+2. Regex uzorci se koriste za fleksibilno prepoznavanje morfoloških varijanti
+3. Korijenski oblici osiguravaju prepoznavanje svih padežnih i glagolskih oblika
 
 **Formula za brojanje:**
 
@@ -394,37 +313,33 @@ gdje je $P_c$ skup regex uzoraka za kategoriju $c$, a $d$ je tekst dokumenta.
 ```{r semantic-dictionary}
 #| label: semantic-dictionary
 
-# Definicija rječnika polarizacijskih pojmova - STEMMED VERSION
 semantic_terms <- list(
   
-  # 1. POLARIZACIJA I PODJELE
   polarizacija_podjele = c(
-    "polarizacij[a-zčćžšđ]*",              # polarizacija
-    "podijeljen[a-zčćžšđ]*",               # podijeljenost
-    "podjel[aeiou]+[a-zčćžšđ]*",           # podjela, podjele
-    "rascjep[a-zčćžšđ]*",                  # rascjep
-    "razdor[a-zčćžšđ]*",                   # razdor
-    "podvojen[a-zčćžšđ]*",                 # podvojenost
+    "polarizacij[a-zčćžšđ]*",
+    "podijeljen[a-zčćžšđ]*",
+    "podjel[aeiou]+[a-zčćžšđ]*",
+    "rascjep[a-zčćžšđ]*",
+    "razdor[a-zčćžšđ]*",
+    "podvojen[a-zčćžšđ]*",
     "(dru[sš]tven|politi[cč]k)[a-zčćžšđ]*.{0,10}podjel[a-zčćžšđ]*"
   ),
   
-  # 2. LIJEVO-DESNO SPEKTAR
   lijevo_desno = c(
-    "ljevic[a-zčćžšđ]*",                   # ljevica
-    "desnic[a-zčćžšđ]*",                   # desnica
-    "lijevi[a-zčćžšđ]*",                   # lijevi
-    "desni[a-zčćžšđ]*",                    # desni
-    "ljevi[cč]ar[a-zčćžšđ]*",              # ljevičar
-    "desni[cč]ar[a-zčćžšđ]*",              # desničar
-    "konzervativ[a-zčćžšđ]*",              # konzervativac
-    "liberal[a-zčćžšđ]*",                  # liberal
-    "progresiv[a-zčćžšđ]*",                # progresivac
-    "nacionalist[a-zčćžšđ]*",              # nacionalist
-    "populist[a-zčćžšđ]*",                 # populist
-    "suverenist[a-zčćžšđ]*"                # suverenist
+    "ljevic[a-zčćžšđ]*",
+    "desnic[a-zčćžšđ]*",
+    "lijevi[a-zčćžšđ]*",
+    "desni[a-zčćžšđ]*",
+    "ljevi[cč]ar[a-zčćžšđ]*",
+    "desni[cč]ar[a-zčćžšđ]*",
+    "konzervativ[a-zčćžšđ]*",
+    "liberal[a-zčćžšđ]*",
+    "progresiv[a-zčćžšđ]*",
+    "nacionalist[a-zčćžšđ]*",
+    "populist[a-zčćžšđ]*",
+    "suverenist[a-zčćžšđ]*"
   ),
   
-  # 3. STRANAČKI SUKOBI
   stranacki_sukobi = c(
     "(hdz|sdp).{0,20}(sukob|napad|optu[zž]|protiv|kritik)",
     "(mo[zž]emo|most|dp).{0,20}(sukob|napad|optu[zž]|protiv)",
@@ -436,7 +351,6 @@ semantic_terms <- list(
     "koalicij[a-zčćžšđ]*.{0,10}(kriz|sukob|raspad)"
   ),
   
-  # 4. GOVOR MRŽNJE
   govor_mrznje = c(
     "govor[a-zčćžšđ]*.{0,5}mr[zž]nj[a-zčćžšđ]*",
     "mr[zž]nj[aeiou]+[a-zčćžšđ]*",
@@ -445,34 +359,31 @@ semantic_terms <- list(
     "(politi[cč]k|etni[cč]k|vjers|nacionaln)[a-zčćžšđ]*.{0,10}mr[zž]nj"
   ),
   
-  # 5. NETOLERANCIJA I DISKRIMINACIJA
   netolerancija = c(
-    "ksenofobij[a-zčćžšđ]*",               # ksenofobija
-    "homofobij[a-zčćžšđ]*",                # homofobija
-    "rasiz[a-zčćžšđ]*",                    # rasizam
-    "rasisti[cč]k[a-zčćžšđ]*",             # rasistički
-    "antisemitiz[a-zčćžšđ]*",              # antisemitizam
-    "mizoginij[a-zčćžšđ]*",                # mizoginija
-    "netrpeljivost[a-zčćžšđ]*",            # netrpeljivost
-    "nesno[sš]ljivost[a-zčćžšđ]*",         # nesnošljivost
-    "diskriminacij[a-zčćžšđ]*",            # diskriminacija
-    "stigmatizacij[a-zčćžšđ]*"             # stigmatizacija
+    "ksenofobij[a-zčćžšđ]*",
+    "homofobij[a-zčćžšđ]*",
+    "rasiz[a-zčćžšđ]*",
+    "rasisti[cč]k[a-zčćžšđ]*",
+    "antisemitiz[a-zčćžšđ]*",
+    "mizoginij[a-zčćžšđ]*",
+    "netrpeljivost[a-zčćžšđ]*",
+    "nesno[sš]ljivost[a-zčćžšđ]*",
+    "diskriminacij[a-zčćžšđ]*",
+    "stigmatizacij[a-zčćžšđ]*"
   ),
   
-  # 6. POVIJESNI SUKOBI
   povijesni_sukobi = c(
-    "usta[sš][a-zčćžšđ]*",                 # ustaše
-    "partizan[a-zčćžšđ]*",                 # partizani
-    "\\bndh\\b",                            # NDH
-    "za dom spremni",                       # Za dom spremni
-    "jasenovac[a-zčćžšđ]*",                # Jasenovac
-    "bleiburg[a-zčćžšđ]*",                 # Bleiburg
-    "kri[zž]ni put",                        # Križni put
-    "revizij[a-zčćžšđ]*.{0,10}povijesti",  # revizija povijesti
+    "usta[sš][a-zčćžšđ]*",
+    "partizan[a-zčćžšđ]*",
+    "\\bndh\\b",
+    "za dom spremni",
+    "jasenovac[a-zčćžšđ]*",
+    "bleiburg[a-zčćžšđ]*",
+    "kri[zž]ni put",
+    "revizij[a-zčćžšđ]*.{0,10}povijesti",
     "instrumentalizacij[a-zčćžšđ]*.{0,10}(pro[sš]lost|povijest|[zž]rtav)"
   ),
   
-  # 7. RODNA PITANJA I LGBT
   rodna_lgbt = c(
     "rodn[a-zčćžšđ]*.{0,10}ideologij[a-zčćžšđ]*",
     "istanbulsk[a-zčćžšđ]*.{0,10}konvencij[a-zčćžšđ]*",
@@ -484,51 +395,46 @@ semantic_terms <- list(
     "queer[a-zčćžšđ]*"
   ),
   
-  # 8. POBAČAJ I PRO-LIFE
   pobacaj_prolife = c(
-    "poba[cč]aj[a-zčćžšđ]*",               # pobačaj
-    "pravo.{0,10}poba[cč]aj",              # pravo na pobačaj
-    "hod.{0,5}[zž]ivot",                   # Hod za život
-    "pro.?life",                            # pro-life
-    "pro.?choice",                          # pro-choice
-    "nerodeno dijete",                      # nerođeno dijete
-    "pravo.{0,10}izbor"                    # pravo na izbor
+    "poba[cč]aj[a-zčćžšđ]*",
+    "pravo.{0,10}poba[cč]aj",
+    "hod.{0,5}[zž]ivot",
+    "pro.?life",
+    "pro.?choice",
+    "nerodeno dijete",
+    "pravo.{0,10}izbor"
   ),
   
-  # 9. CRKVA I DRŽAVA
   crkva_drzava = c(
     "crkv[a-zčćžšđ]*.{0,15}(politi|dr[zž]av|utjecaj)",
-    "vjeronauk[a-zčćžšđ]*",                # vjeronauk
-    "kri[zž].{0,10}[sš]kol",               # križ u školama
-    "sekulariz[a-zčćžšđ]*",                # sekularizam
-    "klerikaliz[a-zčćžšđ]*",               # klerikalizam
+    "vjeronauk[a-zčćžšđ]*",
+    "kri[zž].{0,10}[sš]kol",
+    "sekulariz[a-zčćžšđ]*",
+    "klerikaliz[a-zčćžšđ]*",
     "katoli[cč]k[a-zčćžšđ]*.{0,10}(crkv|biskupi|vatikan)",
     "(nadbiskup|biskup|kardinal|papa).{0,15}politi[cč]k"
   ),
   
-  # 10. MIGRACIJE
   migracije = c(
-    "migrant[a-zčćžšđ]*",                  # migranti
-    "izbjegli[ck][a-zčćžšđ]*",             # izbjeglice
-    "azilant[a-zčćžšđ]*",                  # azilanti
-    "anti.?migra[a-zčćžšđ]*",              # anti-migracija
+    "migrant[a-zčćžšđ]*",
+    "izbjegli[ck][a-zčćžšđ]*",
+    "azilant[a-zčćžšđ]*",
+    "anti.?migra[a-zčćžšđ]*",
     "(migrant|izbjegli).{0,15}(sukob|mr[zž]nj|netrpelj|napad)"
   ),
   
-  # 11. DEZINFORMACIJE I PROPAGANDA
   dezinformacije = c(
-    "dezinformacij[a-zčćžšđ]*",            # dezinformacije
-    "la[zž]n[a-zčćžšđ]*.{0,5}vijesti",    # lažne vijesti
-    "fake.?news",                           # fake news
-    "propagand[a-zčćžšđ]*",                # propaganda
-    "manipulacij[a-zčćžšđ]*",              # manipulacija
-    "botov[aei]?[a-zčćžšđ]*",              # botovi
-    "informacijski.{0,5}rat",              # informacijski rat
-    "medijski.{0,5}rat",                   # medijski rat
-    "teorij[a-zčćžšđ]*.{0,10}zavjer"       # teorije zavjere
+    "dezinformacij[a-zčćžšđ]*",
+    "la[zž]n[a-zčćžšđ]*.{0,5}vijesti",
+    "fake.?news",
+    "propagand[a-zčćžšđ]*",
+    "manipulacij[a-zčćžšđ]*",
+    "botov[aei]?[a-zčćžšđ]*",
+    "informacijski.{0,5}rat",
+    "medijski.{0,5}rat",
+    "teorij[a-zčćžšđ]*.{0,10}zavjer"
   ),
   
-  # 12. IDENTITETSKA POLITIKA I KULTURNI RATOVI
   identitetska_politika = c(
     "identitetsk[a-zčćžšđ]*.{0,10}politik[a-zčćžšđ]*",
     "politi[cč]k[a-zčćžšđ]*.{0,5}rat",
@@ -543,35 +449,26 @@ semantic_terms <- list(
   )
 )
 
-term_summary <- data.table(
-  Kategorija = names(semantic_terms),
-  Broj_pojmova = sapply(semantic_terms, length),
-  Primjeri = sapply(semantic_terms, function(x) paste(head(x, 2), collapse = ", "))
-)
-```
-
-<details>
-<summary>**Kliknite za prikaz kompletne tablice semantičkog rječnika**</summary>
-
-```{r semantic-table}
-#| label: semantic-table
-
-# Formatiraj nazive kategorija
 category_display <- c(
   "polarizacija_podjele" = "Polarizacija i podjele",
-  "lijevo_desno" = "Lijevo-desno spektar",
+  "lijevo_desno" = "Lijevo desno spektar",
   "stranacki_sukobi" = "Stranački sukobi",
   "govor_mrznje" = "Govor mržnje",
   "netolerancija" = "Netolerancija i diskriminacija",
   "povijesni_sukobi" = "Povijesni sukobi",
   "rodna_lgbt" = "Rodna pitanja i LGBT",
-  "pobacaj_prolife" = "Pobačaj i pro-life",
+  "pobacaj_prolife" = "Pobačaj i pro life",
   "crkva_drzava" = "Crkva i država",
   "migracije" = "Migracije",
   "dezinformacije" = "Dezinformacije i propaganda",
   "identitetska_politika" = "Identitetska politika"
 )
 
+term_summary <- data.table(
+  Kategorija = names(semantic_terms),
+  Broj_pojmova = sapply(semantic_terms, length),
+  Primjeri = sapply(semantic_terms, function(x) paste(head(x, 2), collapse = ", "))
+)
 term_summary[, Kategorija_display := category_display[Kategorija]]
 
 kable(term_summary[, .(Kategorija_display, Broj_pojmova, Primjeri)], 
@@ -580,24 +477,20 @@ kable(term_summary[, .(Kategorija_display, Broj_pojmova, Primjeri)],
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
-</details>
-
-## Brojanje semantičkih pojmova po člancima
-
-Za svaki članak se zbrajaju pojavljivanja pojmova iz svake kategorije. Brojanje se provodi korištenjem regularnih izraza (regex) koji prepoznaju morfološke varijante pojmova.
+## Brojanje semantičkih pojmova
 
 ```{r count-semantic-terms}
 #| label: count-semantic-terms
 
 count_terms <- function(text, patterns) {
-  if(is.na(text) || text == "") return(0)
+  if (is.na(text) || text == "") return(0)
   text_lower <- tolower(text)
   sum(sapply(patterns, function(p) {
     stri_count_regex(text_lower, p)
   }))
 }
 
-for(cat_name in names(semantic_terms)) {
+for (cat_name in names(semantic_terms)) {
   col_name <- paste0("count_", cat_name)
   dt[, (col_name) := sapply(FULL_TEXT, count_terms, patterns = semantic_terms[[cat_name]])]
 }
@@ -605,9 +498,7 @@ for(cat_name in names(semantic_terms)) {
 dt[, count_all_semantic := rowSums(.SD), .SDcols = patterns("^count_")]
 ```
 
-## Mjesečna agregacija semantičkih pojmova
-
-Podaci se agregiraju na mjesečnoj razini kako bi se omogućila analiza vremenskih trendova za svaku semantičku kategoriju.
+## Dinamika semantičkih kategorija
 
 ```{r monthly-semantic}
 #| label: monthly-semantic
@@ -622,10 +513,6 @@ monthly_semantic <- dt[, c(
 
 monthly_semantic[, total_mentions := count_all_semantic]
 ```
-
-## Vizualizacija semantičkih kategorija kroz vrijeme
-
-Na sljedećem grafikonu se prikazuje dinamika svih 12 semantičkih kategorija kroz vrijeme.
 
 ```{r semantic-time-series}
 #| label: semantic-time-series
@@ -653,14 +540,14 @@ semantic_long <- melt(
 
 category_labels <- c(
   "count_polarizacija_podjele" = "Polarizacija/Podjele",
-  "count_lijevo_desno" = "Lijevo-Desno",
+  "count_lijevo_desno" = "Lijevo Desno",
   "count_stranacki_sukobi" = "Stranački sukobi",
   "count_govor_mrznje" = "Govor mržnje",
   "count_netolerancija" = "Netolerancija",
   "count_povijesni_sukobi" = "Povijesni sukobi",
   "count_rodna_lgbt" = "Rodna/LGBT",
-  "count_pobacaj_prolife" = "Pobačaj/Pro-life",
-  "count_crkva_drzava" = "Crkva-Država",
+  "count_pobacaj_prolife" = "Pobačaj/Pro life",
+  "count_crkva_drzava" = "Crkva Država",
   "count_migracije" = "Migracije",
   "count_dezinformacije" = "Dezinformacije",
   "count_identitetska_politika" = "Identitetska politika"
@@ -681,76 +568,229 @@ ggplot(semantic_long, aes(x = yearmonth, y = broj, color = kategorija_label)) +
     color = NULL
   ) +
   theme(
-    plot.title = element_text(face = "bold"),
     legend.position = "none",
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
-    strip.text = element_text(face = "bold", size = 9)
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 7)
   )
 ```
 
-# Konstrukcija indeksa političke polarizacije
+# Konstrukcija indeksa
 
-## Metodologija
+### Political Polarization Index (PPI)
 
-U ovoj sekciji se konstruira skup specijaliziranih indeksa za praćenje različitih aspekata političke polarizacije u hrvatskim medijima. Indeksi se temelje na semantičkim kategorijama i normaliziraju se na skalu 0-100.
+PPI kvantificira opću razinu polarizacijskog diskursa u medijima mjereći intenzitet pojmova koji direktno opisuju polarizaciju, podjele i rascjepe u društvu. Konstrukcija se temelji na prebrojavanju pojavljivanja korijena riječi poput polarizacij, podijeljen, podjel, rascjep, razdor i slično. Suma tih pojavljivanja normalizira se brojem članaka kako bi se dobila prosječna mjesečna frekvencija pojmova polarizacije. Rezultat se skalira na raspon 0 do 100 standardnom min max normalizacijom. Povišene vrijednosti PPI indeksa indiciraju intenzivan medijski diskurs o podjelama u društvu.
 
-### Pregled indeksa
+::: {.callout-note collapse="true"}
+## Detaljna metodologija PPI indeksa
 
-Konstruira se 10 specijaliziranih indeksa:
-
-1. **PPI** (Political Polarization Index) mjeri opću razinu polarizacijskog diskursa
-2. **PDI** (Party Division Index) prati intenzitet stranačkih sukoba
-3. **HSI** (Hate Speech Index) mjeri prisutnost govora mržnje i netolerancije
-4. **HCI** (Historical Conflict Index) prati diskurs o povijesnim podjelama
-5. **CWI** (Culture War Index) mjeri intenzitet kulturnih ratova (rod, LGBT, pobačaj)
-6. **CSI** (Church-State Index) prati tenzije crkva-država
-7. **MII** (Migration Issue Index) mjeri polarizaciju oko migracijskih tema
-8. **DII** (Disinformation Index) prati diskurs o dezinformacijama
-9. **LRI** (Left-Right Index) mjeri intenzitet lijevo-desnog diskursa
-10. **CPI** (Composite Polarization Index) kompozitni indeks svih kategorija
-
-::: {.callout-note collapse="true" title="Tehnička metodologija konstrukcije indeksa"}
-
-**Formula za pojedinačne indekse:**
+**Formula:**
 
 $$
-\text{Indeks}_{i,t} = \text{normalize}_{0-100}\left(\frac{\sum_{p \in P_i} \text{count}_{p,t}}{N_t}\right)
+\text{PPI}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{polarizacija,t}}{N_t}\right)
 $$
 
-gdje je $P_i$ skup pojmova za kategoriju $i$, $\text{count}_{p,t}$ broj pojavljivanja pojma $p$ u mjesecu $t$, a $N_t$ ukupan broj članaka u mjesecu $t$.
+**Uključeni pojmovi:** polarizacija, podijeljenost, podjela, rascjep, razdor, podvojenost, društvene/političke podjele
 
-**Normalizacija (min-max):**
+:::
+
+### Party Division Index (PDI)
+
+PDI prati intenzitet sukoba između političkih stranaka u medijskom izvještavanju. Indeks se konstruira prebrojavanjem pojavljivanja pojmova vezanih uz međustranačke sukobe normaliziranih ukupnim brojem članaka. Vrhovi ukazuju na periode intenzivnih međustranačkih sukoba, često vezanih uz izbore ili političke krize.
+
+::: {.callout-note collapse="true"}
+## Detaljna metodologija PDI indeksa
+
+**Formula:**
 
 $$
-X_{norm} = \frac{X - \min(X)}{\max(X) - \min(X)} \times 100
+\text{PDI}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{stranački,t}}{N_t}\right)
 $$
 
-**Kompozitni indeks (CPI):**
+**Uključeni pojmovi:** HDZ SDP sukobi, vladajući opozicija, stranački sukobi, politički obračuni, koalicijske krize
+
+:::
+
+### Hate Speech Index (HSI)
+
+HSI mjeri prisutnost govora mržnje i netolerancije u medijskom prostoru. Indeks kombinira pojmove vezane uz govor mržnje i pojmove vezane uz različite oblike diskriminacije i netolerancije. Visoke vrijednosti signaliziraju pojačan diskurs o netoleranciji i diskriminaciji.
+
+::: {.callout-note collapse="true"}
+## Detaljna metodologija HSI indeksa
+
+**Formula:**
 
 $$
-\text{CPI}_t = \frac{1}{12} \sum_{i=1}^{12} \text{Indeks}_{i,t}
+\text{HSI}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{mržnja,t} + \text{count}_{netolerancija,t}}{N_t}\right)
 $$
 
-Jednostavan prosjek svih kategorija osigurava jednaku težinu svakom aspektu polarizacije.
+**Uključeni pojmovi:** govor mržnje, mržnja, poticanje mržnje, ksenofobija, homofobija, rasizam, antisemitizam, diskriminacija, stigmatizacija
+
+:::
+
+### Historical Conflict Index (HCI)
+
+HCI prati diskurs o povijesnim podjelama i traumama iz Drugog svjetskog rata i Domovinskog rata. Indeks je posebno relevantan za hrvatski kontekst s obzirom na nerazriješene povijesne traume. Vrhovi često koincidiraju s komemoracijama, političkim izjavama o prošlosti ili kontroverznim simbolima.
+
+::: {.callout-note collapse="true"}
+## Detaljna metodologija HCI indeksa
+
+**Formula:**
+
+$$
+\text{HCI}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{povijesni,t}}{N_t}\right)
+$$
+
+**Uključeni pojmovi:** ustaše, partizani, NDH, Za dom spremni, Jasenovac, Bleiburg, Križni put, revizija povijesti, instrumentalizacija prošlosti
+
+:::
+
+### Culture War Index (CWI)
+
+CWI mjeri intenzitet diskursa o spornim društvenim pitanjima vezanim uz rod, LGBT prava i reproduktivna prava. Indeks kombinira pojmove iz kategorija rodnih pitanja i pobačaja. Visoke vrijednosti ukazuju na intenzivne društvene debate o vrijednosnim pitanjima.
+
+::: {.callout-note collapse="true"}
+## Detaljna metodologija CWI indeksa
+
+**Formula:**
+
+$$
+\text{CWI}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{rodna\_lgbt,t} + \text{count}_{pobačaj,t}}{N_t}\right)
+$$
+
+**Uključeni pojmovi:** rodna ideologija, Istanbulska konvencija, istospolni brak/zajednica, LGBT, Pride, pobačaj, Hod za život, pro life
+
+:::
+
+### Church State Index (CSI)
+
+CSI prati tenzije između sekularnog i vjerskog u javnom prostoru. Indeks mjeri intenzitet diskursa o ulozi Crkve u politici i javnom životu. Visoke vrijednosti signaliziraju intenzivne debate o utjecaju Crkve na javne politike.
+
+::: {.callout-note collapse="true"}
+## Detaljna metodologija CSI indeksa
+
+**Formula:**
+
+$$
+\text{CSI}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{crkva,t}}{N_t}\right)
+$$
+
+**Uključeni pojmovi:** crkva i politika, vjeronauk, križ u školama, sekularizam, klerikalizam, utjecaj Crkve na politiku
+
+:::
+
+### Migration Issue Index (MII)
+
+MII mjeri intenzitet polarizacije oko tema vezanih uz migracije i izbjeglice. Vrhovi koincidiraju s migracijskim krizama ili političkim debatama o migrantima.
+
+::: {.callout-note collapse="true"}
+## Detaljna metodologija MII indeksa
+
+**Formula:**
+
+$$
+\text{MII}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{migracije,t}}{N_t}\right)
+$$
+
+**Uključeni pojmovi:** migranti, izbjeglice, azilanti, anti migracija, sukobi vezani uz migrante
+
+:::
+
+### Disinformation Index (DII)
+
+DII prati diskurs o lažnim vijestima, propagandi i informacijskom ratu. Visoke vrijednosti ukazuju na intenzivan diskurs o medijskoj manipulaciji i teorijama zavjere.
+
+::: {.callout-note collapse="true"}
+## Detaljna metodologija DII indeksa
+
+**Formula:**
+
+$$
+\text{DII}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{dezinformacije,t}}{N_t}\right)
+$$
+
+**Uključeni pojmovi:** dezinformacije, lažne vijesti, fake news, propaganda, manipulacija, botovi, informacijski rat, teorije zavjere
+
+:::
+
+### Left Right Index (LRI)
+
+LRI mjeri intenzitet ideološkog diskursa na lijevo desnom spektru. Visoke vrijednosti signaliziraju intenzivne ideološke debate o pozicioniranju na političkom spektru.
+
+::: {.callout-note collapse="true"}
+## Detaljna metodologija LRI indeksa
+
+**Formula:**
+
+$$
+\text{LRI}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{lijevo\_desno,t}}{N_t}\right)
+$$
+
+**Uključeni pojmovi:** ljevica, desnica, lijevi, desni, konzervativci, liberali, progresivci, nacionalisti, populisti, suverenisti
+
+:::
+
+### Composite Polarization Index (CPI)
+
+CPI predstavlja kompozitni indeks polarizacije koji agregira sve pojedinačne indekse u jednu mjeru ukupnog polarizacijskog diskursa. Izračunava se kao jednostavni prosjek svih 10 specijaliziranih indeksa čime se osigurava jednaka težina svakom aspektu polarizacije. Visoke vrijednosti indiciraju razdoblja intenzivnog polarizacijskog diskursa općenito.
+
+::: {.callout-note collapse="true"}
+## Detaljna metodologija CPI indeksa
+
+**Formula:**
+
+$$
+\text{CPI}_t = \frac{1}{10} \sum_{i=1}^{10} \text{Indeks}_{i,t}
+$$
 
 **Interpretacija vrijednosti:**
 
-- 0-25: Niska razina polarizacijskog diskursa
-- 25-50: Umjerena razina
-- 50-75: Visoka razina
-- 75-100: Vrlo visoka razina (krizna razdoblja)
+Raspon 0 do 25 indicira nisku razinu polarizacijskog diskursa. Raspon 25 do 50 indicira umjerenu razinu. Raspon 50 do 75 indicira visoku razinu. Raspon 75 do 100 indicira vrlo visoku razinu tipičnu za krizna razdoblja.
 
 :::
+
+## Opis indeksa
+
+```{r index-table-summary}
+#| label: index-table-summary
+
+index_desc <- data.table(
+  Indeks = c("PPI", "PDI", "HSI", "HCI", "CWI", "CSI", "MII", "DII", "LRI", "IPI", "CPI"),
+  Naziv = c("Political Polarization Index", "Party Division Index", "Hate Speech Index",
+            "Historical Conflict Index", "Culture War Index", "Church State Index",
+            "Migration Issue Index", "Disinformation Index", "Left Right Index",
+            "Identity Politics Index", "Composite Polarization Index"),
+  Opis = c("Opća razina polarizacijskog diskursa",
+           "Intenzitet stranačkih sukoba",
+           "Govor mržnje i netolerancija",
+           "Povijesne podjele i traume",
+           "Kulturni ratovi (rod, LGBT, pobačaj)",
+           "Tenzije crkva država",
+           "Polarizacija oko migracija",
+           "Dezinformacije i propaganda",
+           "Lijevo desni diskurs",
+           "Identitetska politika",
+           "Kompozitni indeks svih kategorija")
+)
+
+kable(index_desc, caption = "Pregled konstruiranih indeksa") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
 
 ```{r index-calculation}
 #| label: index-calculation
 
+normalize <- function(x) {
+  if (all(is.na(x))) return(rep(50, length(x)))
+  min_x <- min(x, na.rm = TRUE)
+  max_x <- max(x, na.rm = TRUE)
+  if (max_x == min_x) return(rep(50, length(x)))
+  (x - min_x) / (max_x - min_x) * 100
+}
+
 index_data <- dt[, .(
   volume = .N,
   avg_length = mean(text_length, na.rm = TRUE),
-  avg_reach = if("REACH" %in% names(.SD)) mean(REACH, na.rm = TRUE) else NA_real_,
+  avg_reach = if ("REACH" %in% names(.SD)) mean(REACH, na.rm = TRUE) else NA_real_,
   
-  # Semantic categories
   sem_polarizacija = sum(count_polarizacija_podjele, na.rm = TRUE),
   sem_lijevo_desno = sum(count_lijevo_desno, na.rm = TRUE),
   sem_stranacki = sum(count_stranacki_sukobi, na.rm = TRUE),
@@ -766,52 +806,35 @@ index_data <- dt[, .(
   sem_total = sum(count_all_semantic, na.rm = TRUE)
 ), by = yearmonth][order(yearmonth)]
 
-# Normalize function
-normalize <- function(x) {
-  if(all(is.na(x))) return(rep(50, length(x)))
-  min_x <- min(x, na.rm = TRUE)
-  max_x <- max(x, na.rm = TRUE)
-  if(max_x == min_x) return(rep(50, length(x)))
-  (x - min_x) / (max_x - min_x) * 100
-}
-
-# Calculate normalized indices
 index_data[, `:=`(
-  PPI = normalize(sem_polarizacija / volume),      # Political Polarization Index
-  PDI = normalize(sem_stranacki / volume),         # Party Division Index
-  HSI = normalize((sem_govor_mrznje + sem_netolerancija) / volume),  # Hate Speech Index
-  HCI = normalize(sem_povijesni / volume),         # Historical Conflict Index
-  CWI = normalize((sem_rodna_lgbt + sem_pobacaj) / volume),  # Culture War Index
-  CSI = normalize(sem_crkva / volume),             # Church-State Index
-  MII = normalize(sem_migracije / volume),         # Migration Issue Index
-  DII = normalize(sem_dezinformacije / volume),    # Disinformation Index
-  LRI = normalize(sem_lijevo_desno / volume),      # Left-Right Index
-  IPI = normalize(sem_identitetska / volume)       # Identity Politics Index
+  PPI = normalize(sem_polarizacija / volume),
+  PDI = normalize(sem_stranacki / volume),
+  HSI = normalize((sem_govor_mrznje + sem_netolerancija) / volume),
+  HCI = normalize(sem_povijesni / volume),
+  CWI = normalize((sem_rodna_lgbt + sem_pobacaj) / volume),
+  CSI = normalize(sem_crkva / volume),
+  MII = normalize(sem_migracije / volume),
+  DII = normalize(sem_dezinformacije / volume),
+  LRI = normalize(sem_lijevo_desno / volume),
+  IPI = normalize(sem_identitetska / volume)
 )]
 
-# Composite Polarization Index (simple average of all)
 index_data[, CPI := (PPI + PDI + HSI + HCI + CWI + CSI + MII + DII + LRI + IPI) / 10]
 
-# 3-month moving averages
 index_cols <- c("PPI", "PDI", "HSI", "HCI", "CWI", "CSI", "MII", "DII", "LRI", "IPI", "CPI")
-for(col in index_cols) {
+for (col in index_cols) {
   ma_col <- paste0(col, "_MA3")
   index_data[, (ma_col) := frollmean(get(col), n = 3, align = "center")]
 }
-
-# Year-over-year changes
-index_data[, CPI_yoy := (CPI / shift(CPI, 12) - 1) * 100]
 ```
 
-## Prikaz indeksa kroz vrijeme
+# Vizualizacija indeksa
 
-### Kompozitni indeks polarizacije (CPI)
-
-Na sljedećem grafikonu se prikazuje Kompozitni indeks polarizacije (CPI) kroz vrijeme. CPI predstavlja prosječnu vrijednost svih 10 specijaliziranih indeksa.
+## Glavni indeksi
 
 ```{r cpi-plot}
 #| label: cpi-plot
-#| fig-cap: "Kompozitni indeks polarizacije (CPI)"
+#| fig-cap: "Composite Polarization Index (CPI)"
 #| fig-height: 7
 
 ggplot(index_data, aes(x = yearmonth)) +
@@ -822,31 +845,87 @@ ggplot(index_data, aes(x = yearmonth)) +
   scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
   scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, 20)) +
   labs(
-    title = "Kompozitni indeks polarizacije (CPI)",
-    subtitle = "Prosjek svih kategorija polarizacije (0-100) | Tamna linija = 3-mj. klizni prosjek",
+    title = "Composite Polarization Index (CPI)",
+    subtitle = "Prosjek svih kategorija polarizacije (0 do 100) | Tamna linija = 3 mj. klizni prosjek",
     x = NULL,
     y = "CPI"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold", size = 14),
-    plot.subtitle = element_text(size = 10, color = "gray40"),
-    panel.grid.minor = element_blank()
   )
 ```
 
-### Svi indeksi
+## Indeksi političkih sukoba
 
-```{r all-indices-plot}
-#| label: all-indices-plot
-#| fig-cap: "Svi indeksi polarizacije kroz vrijeme"
-#| fig-height: 12
+```{r political-indices-plot}
+#| label: political-indices-plot
+#| fig-cap: "Indeksi političkih sukoba: PPI, PDI, LRI, IPI"
+#| fig-height: 8
 
-indices_long <- melt(
-  index_data[, .(yearmonth, PPI, PDI, HSI, HCI, CWI, CSI, MII, DII, LRI, IPI)],
-  id.vars = "yearmonth",
-  variable.name = "indeks",
-  value.name = "vrijednost"
-)
+p_ppi <- ggplot(index_data, aes(x = yearmonth, y = PPI)) +
+  geom_line(color = colors_gimes["primary"], linewidth = 1) +
+  labs(title = "Political Polarization Index (PPI)", x = NULL, y = "Indeks (0 do 100)")
+
+p_pdi <- ggplot(index_data, aes(x = yearmonth, y = PDI)) +
+  geom_line(color = colors_gimes["secondary"], linewidth = 1) +
+  labs(title = "Party Division Index (PDI)", x = NULL, y = "Indeks (0 do 100)")
+
+p_lri <- ggplot(index_data, aes(x = yearmonth, y = LRI)) +
+  geom_line(color = colors_gimes["accent"], linewidth = 1) +
+  labs(title = "Left Right Index (LRI)", x = NULL, y = "Indeks (0 do 100)")
+
+p_ipi <- ggplot(index_data, aes(x = yearmonth, y = IPI)) +
+  geom_line(color = colors_gimes["purple"], linewidth = 1) +
+  labs(title = "Identity Politics Index (IPI)", x = NULL, y = "Indeks (0 do 100)")
+
+(p_ppi | p_pdi) / (p_lri | p_ipi)
+```
+
+## Indeksi društvenih sukoba
+
+```{r social-indices-plot}
+#| label: social-indices-plot
+#| fig-cap: "Indeksi društvenih sukoba: HSI, HCI, CWI, CSI"
+#| fig-height: 8
+
+p_hsi <- ggplot(index_data, aes(x = yearmonth, y = HSI)) +
+  geom_line(color = colors_gimes["danger"], linewidth = 1) +
+  labs(title = "Hate Speech Index (HSI)", x = NULL, y = "Indeks (0 do 100)")
+
+p_hci <- ggplot(index_data, aes(x = yearmonth, y = HCI)) +
+  geom_line(color = colors_gimes["warning"], linewidth = 1) +
+  labs(title = "Historical Conflict Index (HCI)", x = NULL, y = "Indeks (0 do 100)")
+
+p_cwi <- ggplot(index_data, aes(x = yearmonth, y = CWI)) +
+  geom_line(color = colors_gimes["success"], linewidth = 1) +
+  labs(title = "Culture War Index (CWI)", x = NULL, y = "Indeks (0 do 100)")
+
+p_csi <- ggplot(index_data, aes(x = yearmonth, y = CSI)) +
+  geom_line(color = colors_gimes["teal"], linewidth = 1) +
+  labs(title = "Church State Index (CSI)", x = NULL, y = "Indeks (0 do 100)")
+
+(p_hsi | p_hci) / (p_cwi | p_csi)
+```
+
+## Indeksi specifičnih tema
+
+```{r special-indices-plot}
+#| label: special-indices-plot
+#| fig-cap: "Migration Issue Index (MII) i Disinformation Index (DII)"
+#| fig-height: 5
+
+p_mii <- ggplot(index_data, aes(x = yearmonth, y = MII)) +
+  geom_line(color = colors_gimes["muted"], linewidth = 1) +
+  labs(title = "Migration Issue Index (MII)", x = NULL, y = "Indeks (0 do 100)")
+
+p_dii <- ggplot(index_data, aes(x = yearmonth, y = DII)) +
+  geom_line(color = colors_gimes["purple"], linewidth = 1) +
+  labs(title = "Disinformation Index (DII)", x = NULL, y = "Indeks (0 do 100)")
+
+p_mii | p_dii
+```
+
+## Tablica indeksa
+
+```{r index-table}
+#| label: index-table
 
 index_labels <- c(
   "PPI" = "Political Polarization",
@@ -854,203 +933,12 @@ index_labels <- c(
   "HSI" = "Hate Speech",
   "HCI" = "Historical Conflict",
   "CWI" = "Culture War",
-  "CSI" = "Church-State",
+  "CSI" = "Church State",
   "MII" = "Migration Issue",
   "DII" = "Disinformation",
-  "LRI" = "Left-Right",
+  "LRI" = "Left Right",
   "IPI" = "Identity Politics"
 )
-
-indices_long[, indeks_label := index_labels[as.character(indeks)]]
-
-ggplot(indices_long, aes(x = yearmonth, y = vrijednost, color = indeks_label)) +
-  geom_line(linewidth = 1) +
-  facet_wrap(~indeks_label, ncol = 2, scales = "free_y") +
-  scale_x_date(date_breaks = "6 months", date_labels = "%b %y") +
-  scale_color_brewer(palette = "Paired") +
-  labs(
-    title = "Svi indeksi polarizacije kroz vrijeme",
-    subtitle = "Normalizirane vrijednosti (0-100)",
-    x = NULL,
-    y = "Vrijednost indeksa",
-    color = NULL
-  ) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    legend.position = "none",
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
-    strip.text = element_text(face = "bold", size = 9)
-  )
-```
-
-## Objašnjenja pojedinačnih indeksa
-
-### PPI (Political Polarization Index)
-
-Indeks političke polarizacije (PPI) mjeri opću razinu polarizacijskog diskursa u medijima. Temelji se na pojmovima koji direktno opisuju polarizaciju, podjele i rascjepe u društvu.
-
-::: {.callout-note collapse="true" title="Tehnička metodologija PPI indeksa"}
-
-**Formula:**
-
-$$
-\text{PPI}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{polarizacija,t}}{N_t}\right)
-$$
-
-**Uključeni pojmovi:** polarizacija, podijeljenost, podjela, rascjep, razdor, podvojenost, društvene/političke podjele
-
-**Interpretacija:** Visoke vrijednosti ukazuju na intenzivan medijski diskurs o podjelama u društvu.
-
-:::
-
-### PDI (Party Division Index)
-
-Indeks stranačke podjele (PDI) prati intenzitet sukoba između političkih stranaka u medijskom izvještavanju.
-
-::: {.callout-note collapse="true" title="Tehnička metodologija PDI indeksa"}
-
-**Formula:**
-
-$$
-\text{PDI}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{stranački,t}}{N_t}\right)
-$$
-
-**Uključeni pojmovi:** HDZ-SDP sukobi, vladajući-opozicija, stranački sukobi, politički obračuni, koalicijske krize
-
-**Interpretacija:** Vrhovi ukazuju na periode intenzivnih međustranačkih sukoba, često vezanih uz izbore ili političke krize.
-
-:::
-
-### HSI (Hate Speech Index)
-
-Indeks govora mržnje (HSI) mjeri prisutnost govora mržnje i netolerancije u medijskom prostoru.
-
-::: {.callout-note collapse="true" title="Tehnička metodologija HSI indeksa"}
-
-**Formula:**
-
-$$
-\text{HSI}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{mržnja,t} + \text{count}_{netolerancija,t}}{N_t}\right)
-$$
-
-**Uključeni pojmovi:** govor mržnje, mržnja, poticanje mržnje, ksenofobija, homofobija, rasizam, antisemitizam, diskriminacija, stigmatizacija
-
-**Interpretacija:** Visoke vrijednosti signaliziraju pojačan diskurs o netoleranciji i diskriminaciji.
-
-:::
-
-### HCI (Historical Conflict Index)
-
-Indeks povijesnih sukoba (HCI) prati diskurs o povijesnim podjelama i traumama iz Drugog svjetskog rata i Domovinskog rata.
-
-::: {.callout-note collapse="true" title="Tehnička metodologija HCI indeksa"}
-
-**Formula:**
-
-$$
-\text{HCI}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{povijesni,t}}{N_t}\right)
-$$
-
-**Uključeni pojmovi:** ustaše, partizani, NDH, Za dom spremni, Jasenovac, Bleiburg, Križni put, revizija povijesti, instrumentalizacija prošlosti
-
-**Interpretacija:** Vrhovi često koincidiraju s komemoracijama, političkim izjavama o prošlosti ili kontroverznim simbolima.
-
-:::
-
-### CWI (Culture War Index)
-
-Indeks kulturnih ratova (CWI) mjeri intenzitet diskursa o spornim društvenim pitanjima vezanim uz rod, LGBT prava i reproduktivna prava.
-
-::: {.callout-note collapse="true" title="Tehnička metodologija CWI indeksa"}
-
-**Formula:**
-
-$$
-\text{CWI}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{rodna\_lgbt,t} + \text{count}_{pobačaj,t}}{N_t}\right)
-$$
-
-**Uključeni pojmovi:** rodna ideologija, Istanbulska konvencija, istospolni brak/zajednica, LGBT, Pride, pobačaj, Hod za život, pro-life
-
-**Interpretacija:** Visoke vrijednosti ukazuju na intenzivne društvene debate o vrijednosnim pitanjima.
-
-:::
-
-### CSI (Church-State Index)
-
-Indeks crkva-država (CSI) prati tenzije između sekularnog i vjerskog u javnom prostoru.
-
-::: {.callout-note collapse="true" title="Tehnička metodologija CSI indeksa"}
-
-**Formula:**
-
-$$
-\text{CSI}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{crkva,t}}{N_t}\right)
-$$
-
-**Uključeni pojmovi:** crkva i politika, vjeronauk, križ u školama, sekularizam, klerikalizam, utjecaj Crkve na politiku
-
-**Interpretacija:** Visoke vrijednosti signaliziraju intenzivne debate o ulozi Crkve u javnom životu.
-
-:::
-
-### MII (Migration Issue Index)
-
-Indeks migracijskih pitanja (MII) mjeri intenzitet polarizacije oko tema vezanih uz migracije i izbjeglice.
-
-::: {.callout-note collapse="true" title="Tehnička metodologija MII indeksa"}
-
-**Formula:**
-
-$$
-\text{MII}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{migracije,t}}{N_t}\right)
-$$
-
-**Uključeni pojmovi:** migranti, izbjeglice, azilanti, anti-migracija, sukobi vezani uz migrante
-
-**Interpretacija:** Vrhovi koincidiraju s migracijskim krizama ili političkim debatama o migrantima.
-
-:::
-
-### DII (Disinformation Index)
-
-Indeks dezinformacija (DII) prati diskurs o lažnim vijestima, propagandi i informacijskom ratu.
-
-::: {.callout-note collapse="true" title="Tehnička metodologija DII indeksa"}
-
-**Formula:**
-
-$$
-\text{DII}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{dezinformacije,t}}{N_t}\right)
-$$
-
-**Uključeni pojmovi:** dezinformacije, lažne vijesti, fake news, propaganda, manipulacija, botovi, informacijski rat, teorije zavjere
-
-**Interpretacija:** Visoke vrijednosti ukazuju na intenzivan diskurs o medijskoj manipulaciji.
-
-:::
-
-### LRI (Left-Right Index)
-
-Indeks lijevo-desno (LRI) mjeri intenzitet ideološkog diskursa na lijevo-desnom spektru.
-
-::: {.callout-note collapse="true" title="Tehnička metodologija LRI indeksa"}
-
-**Formula:**
-
-$$
-\text{LRI}_t = \text{normalize}_{0-100}\left(\frac{\text{count}_{lijevo\_desno,t}}{N_t}\right)
-$$
-
-**Uključeni pojmovi:** ljevica, desnica, lijevi, desni, konzervativci, liberali, progresivci, nacionalisti, populisti, suverenisti
-
-**Interpretacija:** Visoke vrijednosti signaliziraju intenzivne ideološke debate.
-
-:::
-
-## Tablica indeksa
-
-```{r index-table}
-#| label: index-table
 
 index_table <- index_data[, .(
   Mjesec = format(yearmonth, "%b %Y"),
@@ -1064,17 +952,99 @@ index_table <- index_data[, .(
 )]
 
 kable(tail(index_table, 12), 
-      caption = "Indeksi polarizacije - zadnjih 12 mjeseci",
+      caption = "Indeksi polarizacije: zadnjih 12 mjeseci",
       align = c("l", "r", rep("r", 6))) %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
   row_spec(0, bold = TRUE, background = colors_gimes["primary"], color = "white")
 ```
 
-# Korelacijska analiza
+# Sektorska analiza
 
-## Korelacijska matrica indeksa
+## Dinamika po sektorima
 
-Korelacijska matrica prikazuje međusobne odnose između svih konstruiranih indeksa. Pozitivna korelacija ukazuje na to da dva indeksa tendiraju rasti i padati zajedno.
+```{r sector-dynamics}
+#| label: sector-dynamics
+#| fig-cap: "Dinamika polarizacijskih kategorija po tipu izvora"
+#| fig-height: 10
+
+sector_monthly <- dt[, .(
+  N = .N,
+  polarizacija = sum(count_polarizacija_podjele, na.rm = TRUE),
+  stranacki = sum(count_stranacki_sukobi, na.rm = TRUE),
+  govor_mrznje = sum(count_govor_mrznje, na.rm = TRUE),
+  povijesni = sum(count_povijesni_sukobi, na.rm = TRUE),
+  kultura = sum(count_rodna_lgbt + count_pobacaj_prolife, na.rm = TRUE)
+), by = .(yearmonth, source_category)][order(yearmonth)]
+
+sector_long <- melt(sector_monthly, 
+                    id.vars = c("yearmonth", "source_category", "N"),
+                    variable.name = "kategorija",
+                    value.name = "broj")
+
+sector_labels <- c(
+  "polarizacija" = "Polarizacija",
+  "stranacki" = "Stranački sukobi",
+  "govor_mrznje" = "Govor mržnje",
+  "povijesni" = "Povijesni sukobi",
+  "kultura" = "Kulturni ratovi"
+)
+
+sector_long[, kategorija_label := sector_labels[as.character(kategorija)]]
+
+ggplot(sector_long, aes(x = yearmonth, y = broj, color = source_category)) +
+  geom_line(linewidth = 0.8) +
+  facet_wrap(~kategorija_label, ncol = 2, scales = "free_y") +
+  scale_x_date(date_breaks = "6 months", date_labels = "%b %y") +
+  scale_color_manual(values = c("national" = colors_gimes["primary"],
+                                "business" = colors_gimes["accent"],
+                                "regional" = colors_gimes["success"],
+                                "specialized" = colors_gimes["warning"],
+                                "opinion" = colors_gimes["secondary"])) +
+  labs(
+    title = "Dinamika polarizacijskih kategorija po tipu izvora",
+    x = NULL,
+    y = "Broj spominjanja",
+    color = "Tip izvora"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 7)
+  )
+```
+
+## Heatmapa sektorske aktivnosti
+
+```{r heatmap}
+#| label: heatmap
+#| fig-cap: "Heatmapa intenziteta polarizacijskih kategorija kroz vrijeme"
+#| fig-height: 8
+
+heatmap_data <- index_data[, .(yearmonth, PPI, PDI, HSI, HCI, CWI, CSI, MII, DII, LRI, IPI)]
+
+heatmap_long <- melt(heatmap_data, 
+                     id.vars = "yearmonth",
+                     variable.name = "indeks",
+                     value.name = "vrijednost")
+
+heatmap_long[, indeks_label := index_labels[as.character(indeks)]]
+
+ggplot(heatmap_long, aes(x = yearmonth, y = reorder(indeks_label, vrijednost), fill = vrijednost)) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "plasma", name = "Intenzitet") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b %y") +
+  labs(
+    title = "Heatmapa intenziteta polarizacijskih kategorija",
+    subtitle = "Tamnije boje indiciraju viši intenzitet polarizacijskog diskursa",
+    x = NULL,
+    y = NULL
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    axis.text.y = element_text(size = 9),
+    legend.position = "right"
+  )
+```
+
+## Korelacijska struktura
 
 ```{r correlation-matrix}
 #| label: correlation-matrix
@@ -1099,12 +1069,258 @@ corrplot(cor_matrix,
          mar = c(0, 0, 2, 0))
 ```
 
-## Korelacijska tablica
+# Sentiment analiza
+
+## Konstrukcija sentiment leksikona
+
+```{r sentiment-lexicon}
+#| label: sentiment-lexicon
+
+sentiment_negative_stems <- c(
+  "polarizacij[aeiou]*", "podjel[aeiou]*", "rascjep[a-zčćžšđ]*", "razdor[a-zčćžšđ]*",
+  "sukob[a-zčćžšđ]*", "mr[zž]nj[aeiou]*", "netrpelj[a-zčćžšđ]*", "diskriminacij[a-zčćžšđ]*",
+  "ksenofobij[a-zčćžšđ]*", "homofobij[a-zčćžšđ]*", "rasiz[a-zčćžšđ]*",
+  "napad[a-zčćžšđ]*", "optu[zž][a-zčćžšđ]*", "kriz[aeiou]*", "konflikt[a-zčćžšđ]*"
+)
+
+sentiment_positive_stems <- c(
+  "dijalog[a-zčćžšđ]*", "pomiren[a-zčćžšđ]*", "suradnj[aeiou]*", "konsenzus[a-zčćžšđ]*",
+  "tolerancij[a-zčćžšđ]*", "ujedinjavanje", "razumijevanj[aeiou]*",
+  "dogovor[a-zčćžšđ]*", "kompromis[a-zčćžšđ]*"
+)
+
+count_sentiment <- function(text, patterns) {
+  if (is.na(text) || text == "") return(0)
+  text_lower <- tolower(text)
+  sum(sapply(patterns, function(p) stri_count_regex(text_lower, p)))
+}
+
+dt[, neg_count := sapply(FULL_TEXT, count_sentiment, patterns = sentiment_negative_stems)]
+dt[, pos_count := sapply(FULL_TEXT, count_sentiment, patterns = sentiment_positive_stems)]
+dt[, sentiment_score := (pos_count - neg_count) / (pos_count + neg_count + 1)]
+dt[, AUTO_SENTIMENT := fcase(
+  sentiment_score < -0.2, -1,
+  sentiment_score > 0.2, 1,
+  default = 0
+)]
+```
+
+## Dinamika sentimenta kroz vrijeme
+
+```{r sentiment-time}
+#| label: sentiment-time
+#| fig-cap: "Dinamika sentimenta kroz vrijeme"
+
+sentiment_monthly <- dt[, .(
+  avg_sentiment = mean(sentiment_score, na.rm = TRUE),
+  N = .N,
+  pct_negative = sum(AUTO_SENTIMENT == -1, na.rm = TRUE) / .N * 100,
+  pct_positive = sum(AUTO_SENTIMENT == 1, na.rm = TRUE) / .N * 100,
+  pct_neutral = sum(AUTO_SENTIMENT == 0, na.rm = TRUE) / .N * 100
+), by = yearmonth][order(yearmonth)]
+
+ggplot(sentiment_monthly, aes(x = yearmonth)) +
+  geom_hline(yintercept = 0, color = "gray50", linetype = "dashed") +
+  geom_ribbon(aes(ymin = pmin(avg_sentiment, 0), ymax = 0), 
+              fill = colors_gimes["secondary"], alpha = 0.3) +
+  geom_ribbon(aes(ymin = 0, ymax = pmax(avg_sentiment, 0)), 
+              fill = colors_gimes["success"], alpha = 0.3) +
+  geom_line(aes(y = avg_sentiment), color = colors_gimes["primary"], linewidth = 1.2) +
+  geom_point(aes(y = avg_sentiment, size = N), color = colors_gimes["primary"], alpha = 0.6) +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b\n%Y") +
+  scale_size_continuous(range = c(2, 6), labels = comma) +
+  labs(
+    title = "Prosječni sentiment članaka o polarizaciji kroz vrijeme",
+    subtitle = "Negativne vrijednosti = konfliktni ton | Pozitivne vrijednosti = pomirljivi ton",
+    x = NULL,
+    y = "Prosječni sentiment",
+    size = "Broj članaka"
+  )
+```
+
+## Distribucija sentimenta
+
+```{r sentiment-distribution}
+#| label: sentiment-distribution
+#| fig-cap: "Distribucija sentimenta članaka"
+
+sentiment_dist <- dt[, .(N = .N), by = AUTO_SENTIMENT]
+sentiment_dist[, Kategorija := fcase(
+  AUTO_SENTIMENT == -1, "Negativan",
+  AUTO_SENTIMENT == 0, "Neutralan",
+  AUTO_SENTIMENT == 1, "Pozitivan"
+)]
+
+ggplot(sentiment_dist, aes(x = Kategorija, y = N, fill = Kategorija)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = paste0(format(N, big.mark = ","), "\n(", 
+                               round(N/sum(N)*100, 1), "%)")), 
+            vjust = -0.2, size = 4) +
+  scale_fill_manual(values = c("Negativan" = colors_gimes["secondary"],
+                               "Neutralan" = colors_gimes["light"],
+                               "Pozitivan" = colors_gimes["success"])) +
+  scale_y_continuous(labels = comma, expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    title = "Distribucija sentimenta članaka o polarizaciji",
+    x = NULL,
+    y = "Broj članaka"
+  )
+```
+
+# Volatilnost i momentum
+
+## Konstrukcija volatilnosti i momentuma
+
+```{r volatility-momentum}
+#| label: volatility-momentum
+
+index_data[, `:=`(
+  CPI_vol_3m = frollapply(CPI, n = 3, FUN = sd, align = "right"),
+  CPI_mom_1m = CPI - shift(CPI, 1),
+  CPI_mom_3m = CPI - shift(CPI, 3)
+)]
+
+index_data[, `:=`(
+  CPI_vol_3m_z = (CPI_vol_3m - mean(CPI_vol_3m, na.rm = TRUE)) / sd(CPI_vol_3m, na.rm = TRUE),
+  CPI_mom_1m_z = (CPI_mom_1m - mean(CPI_mom_1m, na.rm = TRUE)) / sd(CPI_mom_1m, na.rm = TRUE),
+  CPI_mom_3m_z = (CPI_mom_3m - mean(CPI_mom_3m, na.rm = TRUE)) / sd(CPI_mom_3m, na.rm = TRUE)
+)]
+```
+
+```{r volatility-plot}
+#| label: volatility-plot
+#| fig-cap: "CPI volatilnost i momentum"
+#| fig-height: 10
+
+p_vol <- ggplot(index_data, aes(x = yearmonth, y = CPI_vol_3m)) +
+  geom_line(color = colors_gimes["secondary"], linewidth = 1) +
+  geom_hline(yintercept = mean(index_data$CPI_vol_3m, na.rm = TRUE), 
+             linetype = "dashed", color = colors_gimes["muted"]) +
+  labs(title = "CPI volatilnost (3M rolling SD)", x = NULL, y = "Volatilnost")
+
+p_mom1 <- ggplot(index_data, aes(x = yearmonth, y = CPI_mom_1m)) +
+  geom_col(aes(fill = CPI_mom_1m > 0), show.legend = FALSE) +
+  scale_fill_manual(values = c("TRUE" = colors_gimes["success"], "FALSE" = colors_gimes["danger"])) +
+  geom_hline(yintercept = 0, color = "gray50") +
+  labs(title = "CPI momentum (M/M)", x = NULL, y = "Promjena")
+
+p_mom3 <- ggplot(index_data, aes(x = yearmonth, y = CPI_mom_3m)) +
+  geom_col(aes(fill = CPI_mom_3m > 0), show.legend = FALSE) +
+  scale_fill_manual(values = c("TRUE" = colors_gimes["success"], "FALSE" = colors_gimes["danger"])) +
+  geom_hline(yintercept = 0, color = "gray50") +
+  labs(title = "CPI momentum (3M)", x = NULL, y = "Promjena")
+
+p_vol / p_mom1 / p_mom3
+```
+
+```{r standardized-plot}
+#| label: standardized-plot
+#| fig-cap: "Standardizirani indeksi volatilnosti i momentuma"
+#| fig-height: 6
+
+std_long <- melt(
+  index_data[, .(yearmonth, 
+                 `Volatilnost (3M)` = CPI_vol_3m_z,
+                 `Momentum (1M)` = CPI_mom_1m_z,
+                 `Momentum (3M)` = CPI_mom_3m_z)],
+  id.vars = "yearmonth",
+  variable.name = "mjera",
+  value.name = "z_vrijednost"
+)
+
+ggplot(std_long[!is.na(z_vrijednost)], aes(x = yearmonth, y = z_vrijednost, color = mjera)) +
+  geom_hline(yintercept = 0, color = "gray50", linetype = "dashed") +
+  geom_line(linewidth = 1) +
+  scale_color_manual(values = c(
+    "Volatilnost (3M)" = colors_gimes["secondary"],
+    "Momentum (1M)" = colors_gimes["accent"],
+    "Momentum (3M)" = colors_gimes["success"]
+  )) +
+  labs(
+    title = "Standardizirani indeksi volatilnosti i momentuma (CPI)",
+    subtitle = "Z vrijednosti omogućuju usporedbu različitih mjera",
+    x = NULL,
+    y = "Z vrijednost",
+    color = NULL
+  )
+```
+
+# Koncentracija tema
+
+## Konstrukcija mjera koncentracije
+
+::: {.callout-note collapse="true" title="Metodologija HHI indeksa"}
+
+Herfindahl Hirschman Index (HHI) mjeri koncentraciju tema u medijskom prostoru. Izračunava se kao suma kvadrata udjela svake kategorije. Vrijednosti bliže 1 indiciraju visoku koncentraciju (dominacija jedne teme), dok vrijednosti bliže 0 indiciraju ravnomjerniju raspodjelu pozornosti.
+
+**Formula:**
+
+$$
+\text{HHI}_t = \sum_{i=1}^{n} s_{i,t}^2
+$$
+
+gdje je $s_{i,t}$ udio kategorije $i$ u ukupnom broju spominjanja u mjesecu $t$.
+
+:::
+
+```{r hhi-calculation}
+#| label: hhi-calculation
+
+hhi_data <- monthly_semantic[, .(
+  yearmonth,
+  s_polarizacija = count_polarizacija_podjele / count_all_semantic,
+  s_lijevo = count_lijevo_desno / count_all_semantic,
+  s_stranacki = count_stranacki_sukobi / count_all_semantic,
+  s_mrznja = count_govor_mrznje / count_all_semantic,
+  s_netolerancija = count_netolerancija / count_all_semantic,
+  s_povijesni = count_povijesni_sukobi / count_all_semantic,
+  s_rodna = count_rodna_lgbt / count_all_semantic,
+  s_pobacaj = count_pobacaj_prolife / count_all_semantic,
+  s_crkva = count_crkva_drzava / count_all_semantic,
+  s_migracije = count_migracije / count_all_semantic,
+  s_dezinfo = count_dezinformacije / count_all_semantic,
+  s_identitet = count_identitetska_politika / count_all_semantic
+)]
+
+share_cols <- names(hhi_data)[grepl("^s_", names(hhi_data))]
+hhi_data[, HHI := rowSums(.SD^2, na.rm = TRUE), .SDcols = share_cols]
+
+threshold <- 0.05
+hhi_data[, n_active := rowSums(.SD > threshold, na.rm = TRUE), .SDcols = share_cols]
+
+hhi_data[, HHI_norm := (HHI - (1/12)) / (1 - (1/12)) * 100]
+hhi_data[, HHI_MA3 := frollmean(HHI_norm, n = 3, align = "center")]
+
+index_data <- merge(index_data, hhi_data[, .(yearmonth, HHI, HHI_norm, n_active)], 
+                    by = "yearmonth", all.x = TRUE)
+```
+
+```{r hhi-plot}
+#| label: hhi-plot
+#| fig-cap: "Koncentracija tema (HHI) i broj aktivnih kategorija"
+#| fig-height: 8
+
+p_hhi <- ggplot(hhi_data, aes(x = yearmonth)) +
+  geom_line(aes(y = HHI_norm), color = colors_gimes["muted"], linewidth = 0.8) +
+  geom_line(aes(y = HHI_MA3), color = colors_gimes["primary"], linewidth = 1.2, na.rm = TRUE) +
+  labs(title = "Herfindahl Hirschman Index (HHI)", 
+       subtitle = "Mjera koncentracije tema | Tamna linija = 3M klizni prosjek",
+       x = NULL, y = "HHI (norm.)")
+
+p_active <- ggplot(hhi_data, aes(x = yearmonth, y = n_active)) +
+  geom_line(color = colors_gimes["accent"], linewidth = 1) +
+  labs(title = "Broj aktivnih kategorija", 
+       subtitle = "Kategorije s udjelom većim od 5%",
+       x = NULL, y = "Broj kategorija")
+
+p_hhi / p_active
+```
+
+# Korelacije između indeksa
 
 ```{r correlation-table}
 #| label: correlation-table
 
-# Korelacije s CPI
 cpi_correlations <- data.table(
   Indeks = cor_vars[cor_vars != "CPI"],
   Korelacija_s_CPI = sapply(cor_vars[cor_vars != "CPI"], function(x) {
@@ -1114,256 +1330,17 @@ cpi_correlations <- data.table(
 
 kable(cpi_correlations, 
       col.names = c("Indeks", "Korelacija s CPI"),
-      caption = "Korelacije pojedinačnih indeksa s Kompozitnim indeksom polarizacije") %>%
+      caption = "Korelacije pojedinačnih indeksa s Composite Polarization Index") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
-# Dinamike različitih frekvencija
-
-## Sezonska prilagodba
-
-Sezonska prilagodba se provodi korištenjem STL (Seasonal and Trend decomposition using Loess) dekompozicije.
-
-::: {.callout-note collapse="true" title="Tehnička metodologija sezonske prilagodbe"}
-
-**STL dekompozicija:**
-
-$$
-Y_t = T_t + S_t + R_t
-$$
-
-gdje je $T_t$ trend, $S_t$ sezonska komponenta, a $R_t$ ostatak.
-
-**Sezonski prilagođena serija:**
-
-$$
-Y_{SA,t} = T_t + R_t = Y_t - S_t
-$$
-
-:::
-
-```{r seasonal-adjustment}
-#| label: seasonal-adjustment
-
-cpi_ts <- ts(index_data$CPI, 
-             start = c(year(min(index_data$yearmonth)), month(min(index_data$yearmonth))),
-             frequency = 12)
-
-stl_cpi <- tryCatch({
-  stl(cpi_ts, s.window = "periodic", robust = TRUE)
-}, error = function(e) {
-  message("STL dekompozicija nije uspjela: ", e$message)
-  NULL
-})
-
-if(!is.null(stl_cpi)) {
-  index_data[, CPI_sa := as.numeric(seasadj(stl_cpi))]
-} else {
-  index_data[, CPI_sa := CPI]
-}
-```
-
-## Vizualizacija sezonske komponente
-
-```{r seasonal-decomposition-plot}
-#| label: seasonal-decomposition-plot
-#| fig-cap: "STL dekompozicija Kompozitnog indeksa polarizacije"
-#| fig-height: 10
-
-if(!is.null(stl_cpi)) {
-  decomp_df <- data.table(
-    yearmonth = index_data$yearmonth,
-    Original = as.numeric(cpi_ts),
-    Trend = as.numeric(stl_cpi$time.series[, "trend"]),
-    Sezonska = as.numeric(stl_cpi$time.series[, "seasonal"]),
-    Ostatak = as.numeric(stl_cpi$time.series[, "remainder"]),
-    SA = as.numeric(seasadj(stl_cpi))
-  )
-  
-  decomp_long <- melt(decomp_df, id.vars = "yearmonth", 
-                      variable.name = "komponenta", value.name = "vrijednost")
-  
-  ggplot(decomp_long, aes(x = yearmonth, y = vrijednost)) +
-    geom_line(color = colors_gimes["primary"], linewidth = 0.8) +
-    facet_wrap(~komponenta, ncol = 1, scales = "free_y") +
-    scale_x_date(date_breaks = "6 months", date_labels = "%b %Y") +
-    labs(
-      title = "STL dekompozicija Kompozitnog indeksa polarizacije",
-      subtitle = "Original = Trend + Sezonska + Ostatak | SA = Sezonski prilagođeno",
-      x = NULL,
-      y = "Vrijednost"
-    ) +
-    theme(
-      plot.title = element_text(face = "bold"),
-      strip.text = element_text(face = "bold")
-    )
-}
-```
-
-## Izračun različitih dinamika
-
-```{r calculate-dynamics}
-#| label: calculate-dynamics
-
-annualize_rate <- function(rate, periods_per_year) {
-  ((1 + rate/100)^periods_per_year - 1) * 100
-}
-
-index_data[, `:=`(
-  CPI_mom_sa = (CPI_sa / shift(CPI_sa, 1) - 1) * 100,
-  CPI_yoy_pct = (CPI / shift(CPI, 12) - 1) * 100
-)]
-
-index_data[, CPI_3m_avg := frollmean(CPI_sa, n = 3, align = "right")]
-index_data[, CPI_3m_prev := shift(CPI_3m_avg, 3)]
-index_data[, CPI_3m_ann := annualize_rate((CPI_3m_avg / CPI_3m_prev - 1) * 100, 4)]
-
-index_data[, CPI_6m_avg := frollmean(CPI_sa, n = 6, align = "right")]
-index_data[, CPI_6m_prev := shift(CPI_6m_avg, 6)]
-index_data[, CPI_6m_ann := annualize_rate((CPI_6m_avg / CPI_6m_prev - 1) * 100, 2)]
-```
-
-## Usporedba različitih dinamika
-
-```{r dynamics-comparison}
-#| label: dynamics-comparison
-#| fig-cap: "Usporedba različitih dinamika CPI"
-#| fig-height: 10
-
-dynamics_df <- index_data[, .(
-  yearmonth,
-  `Y/Y (%)` = CPI_yoy_pct,
-  `M/M SA (%)` = CPI_mom_sa,
-  `3M ann. SA (%)` = CPI_3m_ann,
-  `6M ann. SA (%)` = CPI_6m_ann
-)]
-
-dynamics_long <- melt(dynamics_df, id.vars = "yearmonth",
-                      variable.name = "dinamika", value.name = "stopa")
-
-ggplot(dynamics_long[!is.na(stopa)], aes(x = yearmonth, y = stopa, color = dinamika)) +
-  geom_hline(yintercept = 0, color = "gray50", linetype = "dashed") +
-  geom_line(linewidth = 1) +
-  facet_wrap(~dinamika, ncol = 2, scales = "free_y") +
-  scale_x_date(date_breaks = "6 months", date_labels = "%b %y") +
-  scale_color_manual(values = c(
-    "Y/Y (%)" = colors_gimes["primary"],
-    "M/M SA (%)" = colors_gimes["accent"],
-    "3M ann. SA (%)" = colors_gimes["success"],
-    "6M ann. SA (%)" = colors_gimes["warning"]
-  )) +
-  labs(
-    title = "Usporedba različitih dinamika Kompozitnog indeksa polarizacije",
-    subtitle = "Y/Y = godina na godinu | M/M SA = mjesec na mjesec sezonski prilagođeno",
-    x = NULL,
-    y = "Promjena (%)",
-    color = NULL
-  ) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    legend.position = "none",
-    strip.text = element_text(face = "bold"),
-    axis.text.x = element_text(angle = 45, hjust = 1)
-  )
-```
-
-# Heatmapa polarizacije po kategorijama
-
-## Mjesečna heatmapa
-
-Heatmapa prikazuje intenzitet različitih kategorija polarizacije kroz vrijeme. Tamnije boje indiciraju viši intenzitet.
-
-```{r heatmap}
-#| label: heatmap
-#| fig-cap: "Heatmapa intenziteta polarizacijskih kategorija kroz vrijeme"
-#| fig-height: 8
-
-# Prepare data for heatmap
-heatmap_data <- index_data[, .(yearmonth, PPI, PDI, HSI, HCI, CWI, CSI, MII, DII, LRI, IPI)]
-
-heatmap_long <- melt(heatmap_data, 
-                     id.vars = "yearmonth",
-                     variable.name = "indeks",
-                     value.name = "vrijednost")
-
-heatmap_long[, indeks_label := index_labels[as.character(indeks)]]
-
-ggplot(heatmap_long, aes(x = yearmonth, y = reorder(indeks_label, vrijednost), fill = vrijednost)) +
-  geom_tile() +
-  scale_fill_viridis_c(option = "plasma", name = "Intenzitet") +
-  scale_x_date(date_breaks = "3 months", date_labels = "%b %y") +
-  labs(
-    title = "Heatmapa intenziteta polarizacijskih kategorija",
-    subtitle = "Tamnije boje indiciraju viši intenzitet polarizacijskog diskursa",
-    x = NULL,
-    y = NULL
-  ) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
-    axis.text.y = element_text(size = 9),
-    legend.position = "right"
-  )
-```
-
-# Zaključci
-
-## Ključni nalazi
-
-```{r summary-findings}
-#| label: summary-findings
-
-peak_month <- index_data[which.max(CPI), yearmonth]
-peak_value <- index_data[which.max(CPI), CPI]
-
-# Find dominant category
-category_means <- colMeans(index_data[, .(PPI, PDI, HSI, HCI, CWI, CSI, MII, DII, LRI, IPI)], na.rm = TRUE)
-dominant_category <- names(which.max(category_means))
-
-findings <- data.table(
-  Nalaz = c(
-    "Ukupno analiziranih članaka",
-    "Vremenski raspon analize",
-    "Broj izvora",
-    "",
-    "Vrh CPI indeksa",
-    "Vrijednost vrha",
-    "",
-    "Dominantna kategorija",
-    "Prosječna vrijednost",
-    "",
-    "Prosječni CPI",
-    "Standardna devijacija CPI"
-  ),
-  Vrijednost = c(
-    format(nrow(dt), big.mark = ","),
-    paste(format(min(dt$date), "%m/%Y"), "-", format(max(dt$date), "%m/%Y")),
-    as.character(length(unique(dt$FROM))),
-    "",
-    format(peak_month, "%B %Y"),
-    round(peak_value, 1),
-    "",
-    index_labels[dominant_category],
-    round(category_means[dominant_category], 1),
-    "",
-    round(mean(index_data$CPI, na.rm = TRUE), 1),
-    round(sd(index_data$CPI, na.rm = TRUE), 1)
-  )
-)
-
-kable(findings, caption = "Sažetak ključnih nalaza analize") %>%
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
-  row_spec(c(4, 7, 10), background = colors_gimes["light"])
-```
-
-## Export podataka u Excel
+# Export
 
 ```{r export-excel}
 #| label: export-excel
 
 wb <- createWorkbook()
 
-# Main indices sheet
 export_indices <- index_data[, .(
   Datum = yearmonth,
   Godina = year(yearmonth),
@@ -1395,7 +1372,6 @@ header_style <- createStyle(
 addStyle(wb, "Indeksi", header_style, rows = 1, cols = 1:ncol(export_indices))
 setColWidths(wb, "Indeksi", cols = 1:ncol(export_indices), widths = "auto")
 
-# Semantic categories sheet
 semantic_export <- monthly_semantic[, .(
   Datum = yearmonth,
   Broj_clanaka = N,
@@ -1419,15 +1395,12 @@ writeData(wb, "Semanticke_kategorije", semantic_export)
 addStyle(wb, "Semanticke_kategorije", header_style, rows = 1, cols = 1:ncol(semantic_export))
 setColWidths(wb, "Semanticke_kategorije", cols = 1:ncol(semantic_export), widths = "auto")
 
-# Dynamics sheet
 dynamics_export <- index_data[, .(
   Datum = yearmonth,
-  CPI_original = round(CPI, 2),
-  CPI_SA = round(CPI_sa, 2),
-  CPI_YoY = round(CPI_yoy_pct, 2),
-  CPI_MoM_SA = round(CPI_mom_sa, 2),
-  CPI_3M_ann = round(CPI_3m_ann, 2),
-  CPI_6M_ann = round(CPI_6m_ann, 2)
+  CPI = round(CPI, 2),
+  CPI_vol_3m = round(CPI_vol_3m, 2),
+  CPI_mom_1m = round(CPI_mom_1m, 2),
+  CPI_mom_3m = round(CPI_mom_3m, 2)
 )]
 
 addWorksheet(wb, "Dinamike")
@@ -1435,7 +1408,6 @@ writeData(wb, "Dinamike", dynamics_export)
 addStyle(wb, "Dinamike", header_style, rows = 1, cols = 1:ncol(dynamics_export))
 setColWidths(wb, "Dinamike", cols = 1:ncol(dynamics_export), widths = "auto")
 
-# Correlations sheet
 cor_export <- as.data.table(cor_matrix, keep.rownames = "Indeks")
 
 addWorksheet(wb, "Korelacije")
@@ -1443,16 +1415,63 @@ writeData(wb, "Korelacije", cor_export)
 addStyle(wb, "Korelacije", header_style, rows = 1, cols = 1:ncol(cor_export))
 setColWidths(wb, "Korelacije", cols = 1:ncol(cor_export), widths = "auto")
 
-# Save
-output_path <- here("output", "polarization_indices.xlsx")
+output_path <- here("output", "gimes_polarization_indices.xlsx")
 dir.create(here("output"), showWarnings = FALSE, recursive = TRUE)
 saveWorkbook(wb, output_path, overwrite = TRUE)
 
 message("Excel datoteka spremljena: ", output_path)
 ```
 
+# Sažetak
+
+```{r summary-findings}
+#| label: summary-findings
+
+peak_month <- index_data[which.max(CPI), yearmonth]
+peak_value <- index_data[which.max(CPI), CPI]
+
+all_indices <- c("PPI", "PDI", "HSI", "HCI", "CWI", "CSI", "MII", "DII", "LRI", "IPI")
+category_means <- colMeans(index_data[, .SD, .SDcols = all_indices], na.rm = TRUE)
+dominant_category <- names(which.max(category_means))
+
+findings <- data.table(
+  Nalaz = c(
+    "Ukupno analiziranih članaka",
+    "Vremenski raspon analize",
+    "Broj izvora",
+    "",
+    "Vrh CPI indeksa",
+    "Vrijednost vrha",
+    "",
+    "Dominantna kategorija",
+    "Prosječna vrijednost",
+    "",
+    "Prosječni CPI",
+    "Standardna devijacija CPI"
+  ),
+  Vrijednost = c(
+    format(nrow(dt), big.mark = ","),
+    paste(format(min(dt$date), "%m/%Y"), " do ", format(max(dt$date), "%m/%Y")),
+    as.character(length(unique(dt$FROM))),
+    "",
+    format(peak_month, "%B %Y"),
+    round(peak_value, 1),
+    "",
+    index_labels[dominant_category],
+    round(category_means[dominant_category], 1),
+    "",
+    round(mean(index_data$CPI, na.rm = TRUE), 1),
+    round(sd(index_data$CPI, na.rm = TRUE), 1)
+  )
+)
+
+kable(findings, caption = "Sažetak ključnih nalaza analize") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
+  row_spec(c(4, 7, 10), background = colors_gimes["light"])
+```
+
 ---
 
 *Izvještaj generiran: `r Sys.time()`*
 
-*GIMES Research | Analiza medijske pokrivenosti političke polarizacije v1.0*
+*GIMES Research | Analiza medijske pokrivenosti političke polarizacije v2.0*

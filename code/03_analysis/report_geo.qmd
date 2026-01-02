@@ -19,6 +19,7 @@ format:
 execute:
   warning: false
   message: false
+  echo: false
 lang: hr
 ---
 
@@ -61,7 +62,7 @@ pal <- list(
 
 # Uvod
 
-Ovaj dokument konstruira semantičke indekse geopolitičke nestabilnosti temeljene na analizi medijskog diskursa. Indeksi mjere intenzitet, sentiment i neizvjesnost vezanu uz geopolitičke događaje, sukobe i međunarodne odnose.
+U ovom dokumentu se konstruiraju semantički indeksi geopolitičke nestabilnosti temeljeni na analizi medijskog diskursa. Indeksima se mjeri intenzitet, sentiment i neizvjesnost vezana uz geopolitičke događaje, sukobe i međunarodne odnose. Metodologija se temelji na brojanju pojmova iz unaprijed definirane semantičke taksonomije, pri čemu se za svaki članak zbrajaju pojavljivanja relevantnih pojmova, a zatim se provodi mjesečna agregacija i normalizacija.
 
 ```{r load-data}
 #| label: load-data
@@ -97,6 +98,8 @@ cat("Vremenski raspon:", as.character(date_min), "do", as.character(date_max), "
 ```
 
 # Eksploratorni pregled
+
+U ovom poglavlju se prikazuju osnovne deskriptivne statistike dataseta. Analizom se obuhvaćaju broj članaka, vremenski raspon, distribucija izvora i dinamika objavljivanja kroz vrijeme.
 
 ```{r basic-stats}
 #| label: basic-stats
@@ -162,6 +165,36 @@ ggplot(monthly_count, aes(x = yearmonth)) +
 # Semantička taksonomija
 
 ## Hijerarhijska struktura pojmova
+
+Semantička taksonomija se organizira u hijerarhijsku strukturu s makro kategorijama (npr. sukobi, diplomacija) i meso kategorijama (npr. rat općenito, invazija). Za svaku kategoriju se definira skup regularnih izraza (regex pattern) koji obuhvaćaju relevantne pojmove i njihove morfološke varijante.
+
+Pojmovi se definiraju pomoću korijena riječi (stem) kako bi se osigurala šira morfološka pokrivenost. Na primjer, korijen "rat" će prepoznati "rat", "rata", "ratu", "ratovi", "ratovanje" itd.
+
+::: {.callout-note collapse="true" title="Detaljna metodologija semantičke taksonomije"}
+
+**Princip konstrukcije taksonomije:**
+
+1. **Makro kategorije** predstavljaju široke tematske domene (npr. oružani sukobi, diplomacija, energetika)
+2. **Meso kategorije** predstavljaju specifičnije podteme unutar makro kategorija
+3. **Regex uzorci** se koriste za fleksibilno prepoznavanje morfoloških varijanti
+
+**Morfološka pokrivenost:**
+
+Za hrvatski jezik koji ima bogatu morfologiju, koriste se:
+
+- Korijenski oblici s opcionalnim nastavcima: `rat[aou]?` prepoznaje rat, rata, ratu, rato
+- Alternativni oblici: `(sukob|konflikt)` prepoznaje oba sinonima
+- Wildcard znakovi: `.{0,10}` dopušta do 10 bilo kojih znakova između riječi
+
+**Formula za brojanje:**
+
+$$
+\text{count}_{c,d} = \sum_{p \in P_c} \text{matches}(p, d)
+$$
+
+gdje je $P_c$ skup regex uzoraka za kategoriju $c$, a $d$ je tekst dokumenta.
+
+:::
 
 ```{r semantic-taxonomy}
 #| label: semantic-taxonomy
@@ -515,7 +548,7 @@ geopolitical_taxonomy <- list(
       "Nord.?Stream", "Sjeverni?.{0,10}tok",
       "Turski?.{0,10}tok", "Turkish.?Stream"
     ),
-    kritična_infrastruktura = c(
+    kriticna_infrastruktura = c(
       "kriti[cč]n[aeiou]+.{0,10}infrastruktur[aeiou]?",
       "sabota[zž][aeiou]?", "diverzij[aeiou]?"
     )
@@ -562,109 +595,152 @@ tax_summary <- rbindlist(lapply(names(geopolitical_taxonomy), function(macro) {
     )
   }))
 }))
+```
+
+<details>
+<summary>**Kliknite za prikaz kompletne tablice semantičke taksonomije**</summary>
+
+```{r taxonomy-table}
+#| label: taxonomy-table
 
 kable(tax_summary, caption = "Struktura geopolitičke semantičke taksonomije") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
-## Sentiment i neizvjesnost leksikoni
+</details>
+
+## Leksikoni sentimenta i neizvjesnosti
+
+Za mjerenje sentimenta i neizvjesnosti u geopolitičkom kontekstu koriste se specijalizirani leksikoni. Leksikon sentimenta se dijeli na eskalacijske i deeskalacijske pojmove, dok leksikon neizvjesnosti obuhvaća pojmove koji signaliziraju nesigurnost ishoda. Svi pojmovi se definiraju pomoću korijena riječi (stem) kako bi se osigurala šira morfološka pokrivenost.
+
+::: {.callout-note collapse="true" title="Detaljna metodologija leksikona"}
+
+**Eskalacijski sentiment** se mjeri brojenjem pojmova koji signaliziraju povećanje napetosti, sukoba ili nasilja. Koriste se korijenski oblici riječi poput `rat`, `sukob`, `napad`, `žrtv`, `razaranj`.
+
+**Deeskalacijski sentiment** se mjeri brojenjem pojmova koji signaliziraju smirivanje, pregovore ili mirno rješavanje. Koriste se korijenski oblici poput `mir`, `pregovor`, `sporazum`, `povlač`.
+
+**Formula za neto sentiment:**
+
+$$
+\text{Sentiment}_{net} = \text{Deeskalacija} - \text{Eskalacija}
+$$
+
+**Formula za omjer sentimenta:**
+
+$$
+\text{Sentiment}_{ratio} = \frac{\text{Deeskalacija} - \text{Eskalacija}}{\text{Deeskalacija} + \text{Eskalacija}}
+$$
+
+Vrijednosti omjera se kreću od -1 (potpuna eskalacija) do +1 (potpuna deeskalacija).
+
+**Neizvjesnost** se mjeri brojenjem pojmova koji signaliziraju nesigurnost, nepredvidivost ili uvjetnost ishoda. Koriste se korijenski oblici poput `neizvjesn`, `nesigurn`, `rizik`, `možda`, `eventualno`.
+
+:::
 
 ```{r sentiment-uncertainty-lexicons}
 #| label: sentiment-uncertainty-lexicons
 
-# Geopolitički sentiment leksikon (eskalacija vs deeskalacija)
+# Geopolitički sentiment leksikon (eskalacija vs deeskalacija) - STEMMED VERSION
 sentiment_lexicon <- list(
   positive = c(
-    # Deeskalacija i mir
-    "mir", "mirovni", "primirje", "prekid vatre", "deeskalacija",
-    "pregovori", "dogovor", "sporazum", "ugovor", "potpisivanje",
-    "normalizacija", "stabilizacija", "smirivanje", "povlačenje",
-    "oslobađanje", "razmjena zarobljenika", "humanitarni koridor",
-    "diplomatsko rješenje", "suradnja", "partnerstvo", "savez",
-    "podrška", "solidarnost", "jedinstvo", "pobjednik", "pobjeda",
-    "uspjeh", "napredak", "proboj", "oslobođenje", "obrana"
+    # Deeskalacija i mir - korijenski oblici
+    "mir[aeiou]*\\b", "mirovn[aeiou]*", "primirj[aeiou]*", "prekid.{0,5}vatr[aeiou]*", 
+    "deeskalacij[aeiou]*", "pregovor[aeiou]*", "dogovor[aeiou]*", "sporazum[aeiou]*", 
+    "ugovor[aeiou]*", "potpisivanj[aeiou]*", "normalizacij[aeiou]*", "stabilizacij[aeiou]*", 
+    "smirivanj[aeiou]*", "povla[cč]enj[aeiou]*", "osloba[dđ]anj[aeiou]*", 
+    "razmjen[aeiou]+.{0,5}zaroblj", "humanitarn[aeiou]+.{0,5}koridor", 
+    "diplomatsk[aeiou]+.{0,5}rje[sš]enj", "suradnj[aeiou]*", "partnerstv[aeiou]*", 
+    "savez[aeiou]*", "podr[sš]k[aeiou]*", "solidarnost[aeiou]*", "jedinstv[aeiou]*", 
+    "pobjedni[cčk][aeiou]*", "pobjed[aeiou]*", "uspjeh[aeiou]*", "napred[aeiou]*[ka]*", 
+    "proboj[aeiou]*", "oslobo[dđ]enj[aeiou]*", "obran[aeiou]*"
   ),
   negative = c(
-    # Eskalacija i sukob
-    "rat", "sukob", "napad", "invazija", "agresija", "ofenziva",
-    "bombardiranje", "granatiranje", "masakr", "genocid", "zločin",
-    "žrtve", "poginuli", "ranjeni", "razaranje", "uništenje",
-    "eskalacija", "prijetnja", "ultimatum", "sankcije", "embargo",
-    "kriza", "tenzije", "napetost", "neprijateljstvo", "konfrontacija",
-    "provokacija", "incident", "povreda", "kršenje", "opasnost",
-    "poraz", "gubitak", "povlačenje", "okupacija", "anneksija",
-    "terorizam", "atentat", "otmica", "taoci"
+    # Eskalacija i sukob - korijenski oblici
+    "rat[aou]*\\b", "ratov[aeiou]*", "sukob[aeiou]*", "napad[aeiou]*", "invazij[aeiou]*", 
+    "agresij[aeiou]*", "ofenziv[aeiou]*", "bombardiranj[aeiou]*", "granatiranj[aeiou]*", 
+    "masak[a]?r[aeiou]*", "genocid[aeiou]*", "zlo[cč]in[aeiou]*", "[zž]rtv[aeiou]*", 
+    "pogin[aeiou]*", "ranje[aeiou]*", "razaranj[aeiou]*", "uni[sš]tenj[aeiou]*", 
+    "eskalacij[aeiou]*", "prijetn[aeiou]*", "ultimatum[aeiou]*", "sankcij[aeiou]*", 
+    "embargo", "kriz[aeiou]*", "tenzij[aeiou]*", "napet[aeiou]*", "neprijateljstv[aeiou]*", 
+    "konfrontacij[aeiou]*", "provokacij[aeiou]*", "incident[aeiou]*", "povred[aeiou]*", 
+    "kr[sš]enj[aeiou]*", "opasnost[aeiou]*", "poraz[aeiou]*", "gubit[aeiou]*[ka]*", 
+    "okupacij[aeiou]*", "aneksij[aeiou]*", "terorizam", "terorist[aeiou]*", 
+    "atentat[aeiou]*", "otmic[aeiou]*", "taoc[aeiou]*"
   )
 )
 
-# Geopolitička neizvjesnost leksikon
+# Geopolitička neizvjesnost leksikon - STEMMED VERSION
 uncertainty_lexicon <- c(
-  # Neizvjesnost ishoda
-  "neizvjesno", "nesigurno", "nepredvidivo", "rizično", "opasno",
-  "upitno", "dvojbeno", "neodređeno", "nejasno", "komplicirano",
+  # Neizvjesnost ishoda - korijenski oblici
+  "neizvjesn[aeiou]*", "nesigurn[aeiou]*", "nepredvid[aeiou]*", "rizi[cčk][aeiou]*", 
+  "opasn[aeiou]*", "upitn[aeiou]*", "dvojb[aeiou]*", "neodre[dđ][aeiou]*", 
+  "nejasn[aeiou]*", "komplici[aeiou]*",
   # Uvjetnost
-  "možda", "eventualno", "potencijalno", "moguće", "vjerojatno",
-  "ako", "ukoliko", "ovisno o", "pod uvjetom",
+  "možda", "eventualno", "potencijalno", "mogu[cć][aeiou]*", "vjerojat[aeiou]*",
+  "ako", "ukoliko", "ovisn[aeiou]+.{0,3}o", "pod.{0,3}uvjet",
   # Scenariji
-  "scenarij", "mogućnost", "opcija", "alternativa",
+  "scenarij[aeiou]*", "mogu[cć]nost[aeiou]*", "opcij[aeiou]*", "alternativ[aeiou]*",
   # Zabrinutost
-  "zabrinutost", "strah", "oprez", "upozorenje", "prijetnja",
-  "rizik", "opasnost", "ugroza",
+  "zabrinut[aeiou]*", "strah[aeiou]*", "oprez[aeiou]*", "upozorenj[aeiou]*", 
+  "prijetn[aeiou]*", "ugro[zž][aeiou]*",
   # Čekanje
-  "čekanje", "odgoda", "zastoj", "pat pozicija", "zamrznuti sukob",
+  "[cč]ekanj[aeiou]*", "odgod[aeiou]*", "zastoj[aeiou]*", "pat.{0,3}pozicij", 
+  "zamrzn[aeiou]+.{0,5}sukob",
   # Preispitivanje
-  "preispitivanje", "revizija", "promjena", "zaokret"
+  "preispitivanj[aeiou]*", "revizij[aeiou]*", "promjen[aeiou]*", "zaokret[aeiou]*"
 )
 
-# Forward looking (prognostički) leksikon
+# Forward looking (prognostički) leksikon - STEMMED VERSION
 forward_lexicon <- c(
-  # Očekivanja
-  "očekuje se", "predviđa se", "prognozira se", "procjenjuje se",
-  "najavljuje", "planira", "namjerava", "priprema",
+  # Očekivanja - korijenski oblici
+  "o[cč]ek[aeiou]*", "predvi[dđ][aeiou]*", "prognoz[aeiou]*", "procjen[aeiou]*",
+  "najavl[aeiou]*", "planir[aeiou]*", "namjerav[aeiou]*", "priprem[aeiou]*",
   # Budućnost
-  "budući", "nadolazeći", "sljedeći", "uskoro", "ubrzo",
+  "budu[cć][aeiou]*", "nadolaz[aeiou]*", "sljede[cć][aeiou]*", "uskoro", "ubrzo",
   # Planiranje
-  "strategija", "plan", "cilj", "namjera", "pripreme",
+  "strategij[aeiou]*", "plan[aeiou]*\\b", "cilj[aeiou]*", "namjer[aeiou]*",
   # Scenariji
-  "scenarij", "mogući razvoj", "perspektiva", "izgled",
+  "scenarij[aeiou]*", "mogu[cć][aeiou]+.{0,5}razvoj", "perspektiv[aeiou]*", "izgled[aeiou]*",
   # Upozorenja
-  "upozorava", "prijeti", "najavljuje eskalaciju"
+  "upozorav[aeiou]*", "prijet[aeiou]*", "najavl[aeiou]+.{0,5}eskalacij"
 )
 
-# Leksikon intenziteta sukoba
+# Leksikon intenziteta sukoba - STEMMED VERSION
 intensity_lexicon <- list(
   high = c(
-    # Visoki intenzitet
-    "značajan", "znatan", "drastičan", "snažan", "jak",
-    "masivan", "ogroman", "bezpresedan", "povijesni",
-    "razoran", "katastrofalan", "dramatičan", "žestok",
-    "totalni", "potpuni", "apsolutni", "neviđeni"
+    # Visoki intenzitet - korijenski oblici
+    "zna[cč]ajn[aeiou]*", "znatn[aeiou]*", "drasti[cč]n[aeiou]*", "sna[zž]n[aeiou]*", 
+    "jak[aeiou]*\\b", "masivn[aeiou]*", "ogromn[aeiou]*", "bezpresedan[aeiou]*", 
+    "povijesn[aeiou]*", "razorn[aeiou]*", "katastrofal[aeiou]*", "dramati[cč]n[aeiou]*", 
+    "[zž]estok[aeiou]*", "totaln[aeiou]*", "potpun[aeiou]*", "apsolutn[aeiou]*", 
+    "nevi[dđ]en[aeiou]*"
   ),
   moderate = c(
-    # Umjereni intenzitet
-    "umjeren", "ograničen", "lokaliziran", "taktički",
-    "povremeni", "sporadičan", "izolirani"
+    # Umjereni intenzitet - korijenski oblici
+    "umjeren[aeiou]*", "ograni[cč]en[aeiou]*", "lokaliziran[aeiou]*", "takti[cč]k[aeiou]*",
+    "povremen[aeiou]*", "sporadi[cč]n[aeiou]*", "izoliran[aeiou]*"
   ),
   low = c(
-    # Niski intenzitet
-    "minimalan", "simboličan", "marginalan", "slab",
-    "zanemariv", "manji", "lokalni"
+    # Niski intenzitet - korijenski oblici
+    "minimaln[aeiou]*", "simboli[cč]n[aeiou]*", "marginaln[aeiou]*", "slab[aeiou]*\\b",
+    "zanemariv[aeiou]*", "manj[aeiou]*\\b", "lokaln[aeiou]*"
   )
 )
 
-# Leksikon vrsta aktera
+# Leksikon vrsta aktera - STEMMED VERSION
 actor_lexicon <- list(
   state = c(
-    "država", "vlada", "predsjednik", "premijer", "ministar",
-    "ministarstvo", "parlament", "vojska", "armija"
+    "dr[zž]av[aeiou]*", "vlad[aeiou]*\\b", "predsjedni[cčk][aeiou]*", "premijer[aeiou]*", 
+    "ministr[aeiou]*", "ministarstv[aeiou]*", "parlamen[aeiou]*", "vojsk[aeiou]*", 
+    "armij[aeiou]*"
   ),
   nonstate = c(
-    "pobunjenici", "milicija", "teroristi", "militanti",
-    "ekstremisti", "separatisti", "gerilci", "plaćenici"
+    "pobunjeni[cčk][aeiou]*", "milicij[aeiou]*", "terorist[aeiou]*", "militant[aeiou]*",
+    "ekstremist[aeiou]*", "separatist[aeiou]*", "gerilc[aeiou]*", "pla[cć]eni[cčk][aeiou]*"
   ),
   international = c(
-    "UN", "NATO", "EU", "međunarodna zajednica", "koalicija",
-    "mirovne snage", "humanitarne organizacije"
+    "\\bUN\\b", "\\bNATO\\b", "\\bEU\\b", "me[dđ]unarodn[aeiou]+.{0,5}zajednic",
+    "koalicij[aeiou]*", "mirovn[aeiou]+.{0,5}snag", "humanitarn[aeiou]+.{0,5}organizacij"
   )
 )
 
@@ -675,6 +751,8 @@ cat("Definirano", length(forward_lexicon), "forward looking pojmova\n")
 ```
 
 ## Brojanje pojmova
+
+Za svaki članak se zbrajaju pojavljivanja pojmova iz svake kategorije. Brojanje se provodi korištenjem regularnih izraza (regex) koji prepoznaju morfološke varijante pojmova. Rezultati se agregiraju na razini makro kategorija zbrajanjem svih pripadajućih meso kategorija.
 
 ```{r count-terms}
 #| label: count-terms
@@ -739,6 +817,8 @@ cat("Izračunato", length(geo_cols), "geopolitičkih varijabli\n")
 
 ## Mjesečna agregacija
 
+Podaci se agregiraju na mjesečnoj razini kako bi se omogućila analiza vremenskih trendova. Za svaki mjesec se izračunavaju zbroji i prosjeci svih geopolitičkih varijabli, te se dodaju pomoćne mjere poput broja članaka i prosječne duljine teksta.
+
 ```{r monthly-aggregation}
 #| label: monthly-aggregation
 
@@ -764,38 +844,11 @@ monthly[, articles_per_source := N / unique_sources]
 cat("Agregirano", nrow(monthly), "mjeseci podataka\n")
 ```
 
-## TF IDF ponderiranje
-
-```{r tfidf-weights}
-#| label: tfidf-weights
-
-calc_idf <- function(monthly_data, col_name) {
-  N <- nrow(monthly_data)
-  df <- sum(monthly_data[[col_name]] > 0, na.rm = TRUE)
-  if (df == 0) return(0)
-  log(N / df)
-}
-
-idf_weights <- sapply(macro_cols, function(col) calc_idf(monthly, col))
-idf_weights <- idf_weights / max(idf_weights, na.rm = TRUE)
-
-for (col in macro_cols) {
-  tfidf_col <- paste0(col, "_tfidf")
-  monthly[, (tfidf_col) := (get(col) / total_words) * idf_weights[col] * 1000]
-}
-
-tfidf_cols <- paste0(macro_cols, "_tfidf")
-
-idf_table <- data.table(
-  Kategorija = gsub("macro_", "", macro_cols),
-  IDF_weight = round(idf_weights, 3)
-)[order(-IDF_weight)]
-
-kable(idf_table, caption = "IDF težine po kategorijama (veća = diskriminativnija)") %>%
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
-```
-
 ## Definicija indeksa
+
+U ovom poglavlju se definira deset geopolitičkih indeksa. Svaki indeks se konstruira na temelju specifične kombinacije varijabli i normalizira se na skalu 0-100. Normalizacija se provodi korištenjem min-max skaliranja kako bi se omogućila usporedivost indeksa kroz vrijeme.
+
+### Pregled indeksa
 
 ```{r construct-indices}
 #| label: construct-indices
@@ -901,7 +954,9 @@ for (idx in index_cols) {
 cat("Konstruirano 10 geopolitičkih indeksa\n")
 ```
 
-## Opis indeksa
+### Detaljni opis indeksa
+
+U nastavku se pruža detaljan opis svakog od deset konstruiranih indeksa. Za svaki indeks se navodi formula, interpretacija vrijednosti i praktična primjena.
 
 ```{r index-descriptions}
 #| label: index-descriptions
@@ -938,9 +993,285 @@ kable(index_desc, caption = "Pregled konstruiranih geopolitičkih indeksa") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
+#### Geopolitical Risk Index (GRI)
+
+GRI mjeri ukupnu razinu geopolitičke aktivnosti u medijskom diskursu. Indeks se izračunava kao zbroj svih geopolitičkih pojmova normaliziran po broju članaka u danom mjesecu. Viša vrijednost ukazuje na intenzivnije pokrivanje geopolitičkih tema.
+
+$$
+\text{GRI}_t = \text{normalize}_{0-100}\left(\frac{\sum_{c \in C} \text{count}_{c,t}}{N_t}\right)
+$$
+
+gdje je $C$ skup svih geopolitičkih kategorija, $\text{count}_{c,t}$ zbroj pojmova kategorije $c$ u mjesecu $t$, a $N_t$ broj članaka u mjesecu $t$.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija GRI"}
+
+**Normalizacija:** Koristi se min-max skaliranje na raspon 0-100:
+
+$$
+\text{normalize}(x) = \frac{x - \min(x)}{\max(x) - \min(x)} \times 100
+$$
+
+**Interpretacija vrijednosti:**
+
+- 0-25: Niska geopolitička aktivnost
+- 25-50: Umjerena geopolitička aktivnost
+- 50-75: Povišena geopolitička aktivnost
+- 75-100: Visoka geopolitička aktivnost (krizna razdoblja)
+
+**Prednosti i ograničenja:**
+
+- Obuhvaća sve geopolitičke teme jednako
+- Normalizacija po broju članaka kontrolira za varijacije u volumenu vijesti
+- Ne razlikuje pozitivne od negativnih geopolitičkih događaja
+
+:::
+
+#### Conflict Intensity Index (CII)
+
+CII se fokusira specifično na intenzitet sukoba i ratova. Indeks kombinira tri makro kategorije: oružane sukobe, rusko-ukrajinski sukob i bliskoistočni sukob. Viša vrijednost ukazuje na intenzivnije pokrivanje sukoba u medijima.
+
+$$
+\text{CII}_t = \text{normalize}_{0-100}\left(\frac{\text{Sukobi}_t + \text{RU}_t + \text{BI}_t}{N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija CII"}
+
+**Komponente:**
+
+- $\text{Sukobi}_t$: makro_sukobi_ratovi (opći pojmovi sukoba)
+- $\text{RU}_t$: makro_rusija_ukrajina (rusko-ukrajinski sukob)
+- $\text{BI}_t$: makro_izrael_bliski_istok (bliskoistočni sukob)
+
+**Interpretacija:**
+
+- Visoki CII u kombinaciji s niskim GRI: fokusirano pokrivanje specifičnog sukoba
+- Visoki CII i visoki GRI: široka geopolitička kriza s dominacijom sukoba
+- Nagla promjena CII: izbijanje ili eskalacija sukoba
+
+:::
+
+#### Escalation Index (ESI)
+
+ESI mjeri razinu eskalacije u geopolitičkom diskursu. Indeks se temelji na omjeru eskalacijskih i deeskalacijskih pojmova. Viša vrijednost (bliže 100) ukazuje na dominaciju eskalacijskog diskursa, dok niža vrijednost (bliže 0) ukazuje na deeskalaciju.
+
+$$
+\text{ESI}_t = \text{normalize}_{0-100}\left(-\frac{\text{Deeskalacija}_t - \text{Eskalacija}_t}{\text{Deeskalacija}_t + \text{Eskalacija}_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija ESI"}
+
+**Inverzija sentimenta:**
+
+Originalni sentiment ratio se kreće od -1 (eskalacija) do +1 (deeskalacija). Za intuitivniju interpretaciju (viši = gore), omjer se invertira množenjem s -1 prije normalizacije.
+
+**Referentna vrijednost:**
+
+- ESI = 50: neutralan diskurs (jednaka zastupljenost eskalacijskih i deeskalacijskih pojmova)
+- ESI > 50: dominira eskalacijski diskurs
+- ESI < 50: dominira deeskalacijski diskurs
+
+**Primjena:**
+
+ESI je posebno koristan za praćenje dinamike pregovora i mirovnih procesa. Nagli pad ESI može signalizirati pomak prema diplomatskom rješavanju.
+
+:::
+
+#### Geopolitical Uncertainty Index (GUI)
+
+GUI mjeri razinu neizvjesnosti u geopolitičkom diskursu. Indeks se temelji na frekvenciji pojmova koji signaliziraju nesigurnost, nepredvidivost i rizik. Viša vrijednost ukazuje na veću neizvjesnost oko geopolitičkih ishoda.
+
+$$
+\text{GUI}_t = \text{normalize}_{0-100}\left(\frac{\text{Neizvjesnost}_t}{N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija GUI"}
+
+**Kategorije neizvjesnosti:**
+
+1. Eksplicitna neizvjesnost: "neizvjesno", "nesigurno", "nepredvidivo"
+2. Uvjetnost: "možda", "eventualno", "ako", "ukoliko"
+3. Rizik: "rizično", "opasno", "prijetnja"
+4. Scenariji: "mogućnost", "opcija", "alternativa"
+
+**Interpretacija:**
+
+- Visoki GUI prije važnih događaja: neizvjesnost oko ishoda
+- Visoki GUI nakon događaja: nesigurnost oko posljedica
+- Niski GUI: jasna situacija ili konsenzus oko procjena
+
+:::
+
+#### Forward Looking Geopolitical Index (FGI)
+
+FGI mjeri orijentaciju geopolitičkog diskursa prema budućim događajima. Indeks se temelji na pojmovima koji signaliziraju prognoze, planove i očekivanja. Viša vrijednost ukazuje na veći fokus na buduće razvoje situacije.
+
+$$
+\text{FGI}_t = \text{normalize}_{0-100}\left(\frac{\text{Forward}_t}{N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija FGI"}
+
+**Kategorije forward looking pojmova:**
+
+1. Očekivanja: "očekuje se", "predviđa se", "prognozira se"
+2. Planiranje: "planira", "namjerava", "priprema"
+3. Budućnost: "budući", "nadolazeći", "uskoro"
+4. Upozorenja: "upozorava", "prijeti"
+
+**Primjena:**
+
+FGI je koristan za procjenu koliko je medijski diskurs orijentiran prema anticipaciji budućih događaja nasuprot izvještavanju o trenutnim. Visoki FGI može signalizirati period pojačane spekulacije ili priprema za značajne događaje.
+
+:::
+
+#### Regional Tension Index East (RTI_E)
+
+RTI_E specifično mjeri napetosti vezane uz rusko-ukrajinski sukob i šire istočnoeuropsko područje. Indeks se temelji isključivo na makro kategoriji rusija_ukrajina.
+
+$$
+\text{RTI\_E}_t = \text{normalize}_{0-100}\left(\frac{\text{RU}_t}{N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija RTI_E"}
+
+**Komponente:**
+
+Makro kategorija rusija_ukrajina obuhvaća:
+
+- Pojmove vezane uz Rusiju (Kremlj, Putin, Moskva)
+- Pojmove vezane uz Ukrajinu (Kijev, Zelenski)
+- Pojmove specifične za sukob (invazija, specijalna operacija)
+- Regionalne pojmove (Donbas, Krim, Herson)
+- Wagner grupu i plaćenike
+
+**Interpretacija:**
+
+RTI_E omogućuje izolirano praćenje dinamike jednog specifičnog sukoba, neovisno o drugim geopolitičkim temama.
+
+:::
+
+#### Middle East Tension Index (METI)
+
+METI specifično mjeri napetosti na Bliskom istoku, s fokusom na izraelsko-palestinski sukob i šire regionalne tenzije. Indeks se temelji na makro kategoriji izrael_bliski_istok.
+
+$$
+\text{METI}_t = \text{normalize}_{0-100}\left(\frac{\text{BI}_t}{N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija METI"}
+
+**Komponente:**
+
+Makro kategorija izrael_bliski_istok obuhvaća:
+
+- Izrael (Tel Aviv, Jeruzalem, IDF, Netanyahu)
+- Palestina (Gaza, Zapadna obala)
+- Hamas i povezane organizacije
+- Hezbollah i Libanon
+- Iran i regionalne sile
+- Sirija i arapske zemlje
+
+**Primjena:**
+
+METI je posebno relevantan za praćenje ciklusa eskalacije i deeskalacije na Bliskom istoku.
+
+:::
+
+#### Western Alliance Index (WAI)
+
+WAI mjeri aktivnost i vidljivost zapadnih institucija i saveza u geopolitičkom diskursu. Indeks se fokusira na NATO, EU, SAD i ključne zapadnoeuropske zemlje.
+
+$$
+\text{WAI}_t = \text{normalize}_{0-100}\left(\frac{\text{Zapad}_t}{N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija WAI"}
+
+**Komponente:**
+
+Makro kategorija nato_zapad obuhvaća:
+
+- NATO i Atlantski savez
+- EU i europske institucije
+- SAD i američka administracija
+- Ključne zapadnoeuropske zemlje (Britanija, Njemačka, Francuska)
+
+**Interpretacija:**
+
+- Visoki WAI: pojačana aktivnost ili vidljivost zapadnih saveza
+- WAI raste s RTI_E: zapadni odgovor na rusku agresiju
+- WAI raste neovisno: inicijative zapadnih institucija
+
+:::
+
+#### Military Activity Index (MAI)
+
+MAI mjeri intenzitet vojnih tema u medijskom diskursu. Indeks obuhvaća pojmove vezane uz vojsku, oružje, vojne operacije i obrambene sustave.
+
+$$
+\text{MAI}_t = \text{normalize}_{0-100}\left(\frac{\text{Vojska}_t}{N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija MAI"}
+
+**Komponente:**
+
+Makro kategorija vojska_oruzje obuhvaća:
+
+- Općenite vojne pojmove (vojska, oružane snage)
+- Kopnene snage (tenkovi, artiljerija)
+- Zrakoplovstvo (borbeni avioni, bombardiranje)
+- Mornarica (brodovi, podmornice)
+- Dronove i bespilotne letjelice
+- Rakete i projektile
+- Nuklearno oružje
+- Vojnu pomoć i isporuke oružja
+
+**Primjena:**
+
+MAI je koristan za praćenje militarizacije diskursa i fokusa na obrambene teme.
+
+:::
+
+#### Principal Component Index (PCI)
+
+PCI se konstruira korištenjem analize glavnih komponenata (PCA) na svim makro kategorijama. Prva glavna komponenta se koristi kao sintetički indeks koji maksimalno objašnjava varijabilitet svih geopolitičkih tema.
+
+$$
+\text{PCI}_t = \text{normalize}_{0-100}\left(\sum_{i=1}^{k} w_i \cdot z_{i,t}\right)
+$$
+
+gdje su $w_i$ težine iz prve glavne komponente, a $z_{i,t}$ standardizirane vrijednosti makro kategorija.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija PCI"}
+
+**Postupak konstrukcije:**
+
+1. Standardizacija svih makro kategorija (z-score)
+2. Izračun kovarijacijske/korelacijske matrice
+3. Dekompozicija na svojstvene vrijednosti i vektore
+4. Odabir prve glavne komponente
+5. Projekcija podataka na prvu komponentu
+6. Normalizacija na skalu 0-100
+
+**Prednosti:**
+
+- Objektivno ponderiranje tema prema njihovom doprinosu varijabilnosti
+- Reducira dimenzionalnost na jednu sintetičku mjeru
+- Koristi informaciju iz svih tema
+
+**Ograničenja:**
+
+- Interpretacija ovisi o strukturi podataka
+- Težine se mogu mijenjati s novim podacima
+
+:::
+
 # Vizualizacija indeksa
 
 ## Glavni indeksi
+
+Na sljedećim grafikonima se prikazuje dinamika glavnih geopolitičkih indeksa kroz vrijeme. GRI i CII prikazuju ukupnu aktivnost i intenzitet sukoba, ESI prikazuje razinu eskalacije, a GUI prikazuje neizvjesnost. RTI_E i METI prikazuju regionalne napetosti.
 
 ```{r main-indices-plot}
 #| label: main-indices-plot
@@ -982,6 +1313,8 @@ p1 / p2 / p3 / p4
 
 ## Vojna aktivnost i zapadni savezi
 
+Na sljedećem grafikonu se prikazuje usporedba indeksa vojne aktivnosti (MAI) i aktivnosti zapadnih saveza (WAI). Ova usporedba omogućuje praćenje odnosa između militarizacije diskursa i vidljivosti zapadnih institucija.
+
 ```{r military-alliance-plot}
 #| label: military-alliance-plot
 #| fig-cap: "Vojna aktivnost i Zapadni savezi"
@@ -1001,6 +1334,8 @@ ggplot(monthly, aes(x = yearmonth)) +
 
 ## Principal Component Index
 
+PCI predstavlja sintetičku mjeru koja kombinira sve geopolitičke teme u jedan indeks korištenjem analize glavnih komponenata. Na grafikonu se prikazuje mjesečna vrijednost PCI zajedno s 3-mjesečnim kliznim prosjekom za izglađivanje kratkoročnih fluktuacija.
+
 ```{r pci-plot}
 #| label: pci-plot
 #| fig-cap: "Principal Component Index s kliznim prosjekom"
@@ -1017,9 +1352,37 @@ ggplot(monthly, aes(x = yearmonth)) +
   )
 ```
 
-# Regionalna i tematska analiza
+# Sektorska analiza
 
-## Dinamika po regijama/temama
+## Konstrukcija sektorskih indeksa
+
+Sektorski indeksi se konstruiraju za svaku od 12 makro kategorija semantičke taksonomije. Za svaki sektor se izračunava mjesečni zbroj pojmova, koji se zatim normalizira na skalu 0-100 korištenjem min-max skaliranja unutar svakog sektora.
+
+Sektorski indeksi omogućuju praćenje dinamike specifičnih geopolitičkih tema neovisno o ostalim temama. Na primjer, sektor "diplomacija" može rasti dok sektor "sukobi" pada, što bi signaliziralo pomak od vojnog prema diplomatskom djelovanju.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija sektorskih indeksa"}
+
+**Formula za sektorski indeks:**
+
+$$
+\text{Sektor}_{s,t} = \text{normalize}_{0-100}\left(\text{macro}_{s,t}\right)
+$$
+
+gdje je $\text{macro}_{s,t}$ zbroj svih pojmova iz makro kategorije $s$ u mjesecu $t$.
+
+**Napomena o normalizaciji:**
+
+Sektorski indeksi se normaliziraju **unutar svakog sektora**, što znači da vrijednosti različitih sektora nisu izravno usporedive. Vrijednost 80 u sektoru "diplomacija" ne znači nužno veću aktivnost od vrijednosti 60 u sektoru "sukobi" - znači da je aktivnost u diplomaciji visoka u odnosu na povijesne vrijednosti tog sektora.
+
+**Primjena LOESS izglađivanja:**
+
+Na grafikonima se koristi LOESS (Locally Estimated Scatterplot Smoothing) za prikaz trenda. LOESS koristi lokalno ponderirane regresije za izglađivanje podataka, što omogućuje vizualizaciju srednjoročnih trendova bez pretpostavki o funkcionalnom obliku.
+
+:::
+
+## Dinamika sektorskih indeksa
+
+Na sljedećim grafikonima se prikazuje dinamika 10 ključnih geopolitičkih sektora kroz vrijeme. Svaki panel prikazuje normalizirani indeks za jedan sektor, zajedno s LOESS trendom koji izglađuje kratkoročne fluktuacije.
 
 ```{r sector-dynamics}
 #| label: sector-dynamics
@@ -1075,7 +1438,35 @@ ggplot(sector_long, aes(x = yearmonth, y = vrijednost_norm)) +
   )
 ```
 
-## Heatmapa geopolitičke aktivnosti
+## Heatmapa sektorske aktivnosti
+
+Heatmapa pruža vizualni pregled intenziteta svih sektorskih indeksa kroz vrijeme na jednom grafikonu. Svaki redak predstavlja jedan sektor, svaki stupac predstavlja jedan mjesec, a boja ćelije predstavlja normalizirani intenzitet aktivnosti u tom sektoru za taj mjesec.
+
+Toplije boje (žuta, narančasta) označavaju veći intenzitet aktivnosti, dok hladnije boje (ljubičasta, tamno plava) označavaju manji intenzitet. Heatmapa omogućuje brzu identifikaciju razdoblja pojačane aktivnosti u specifičnim sektorima i usporedbu dinamike različitih sektora.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija heatmape"}
+
+**Konstrukcija heatmape:**
+
+1. Za svaki sektor se uzimaju mjesečne normalizirane vrijednosti (0-100)
+2. Podaci se organiziraju u matricu (sektori × mjeseci)
+3. Vrijednosti se mapiraju na kontinuiranu skalu boja (plasma paleta)
+
+**Interpretacija:**
+
+- Horizontalni uzorci: promjene aktivnosti jednog sektora kroz vrijeme
+- Vertikalni uzorci: usporedba aktivnosti različitih sektora u istom mjesecu
+- Dijagonalni uzorci: prijenos fokusa s jednog sektora na drugi
+
+**Plasma paleta:**
+
+Koristi se Viridis plasma paleta koja je dizajnirana za:
+
+- Perceptualnu uniformnost (jednake razlike u vrijednosti = jednake vizualne razlike)
+- Pristupačnost za osobe s poremećajima razlikovanja boja
+- Čitljivost i na zaslonu i u ispisu
+
+:::
 
 ```{r sector-heatmap}
 #| label: sector-heatmap
@@ -1096,6 +1487,8 @@ ggplot(heatmap_data, aes(x = yearmonth, y = tema_label, fill = vrijednost_norm))
 ```
 
 ## Korelacijska struktura
+
+Korelacijska matrica prikazuje međusobne odnose između svih konstruiranih indeksa i sektorskih kategorija. Pozitivna korelacija (crvena) ukazuje na to da dva indeksa/sektora tendiraju rasti i padati zajedno, dok negativna korelacija (plava) ukazuje na obrnuti odnos.
 
 ```{r correlation-matrix}
 #| label: correlation-matrix
@@ -1125,9 +1518,52 @@ corrplot(cor_matrix,
          mar = c(0, 0, 2, 0))
 ```
 
-# Eskalacija vs Deeskalacija analiza
+# Sentiment analiza
 
-## Sentiment komponente
+## Konstrukcija sentiment indeksa
+
+Sentiment analiza u geopolitičkom kontekstu se fokusira na razlikovanje eskalacijskog i deeskalacijskog diskursa. Za svaki članak se broje pojmovi iz eskalacijskog leksikona (rat, sukob, napad, žrtve, razaranje) i deeskalacijskog leksikona (mir, pregovori, sporazum, povlačenje).
+
+Na temelju ovih brojeva se izračunavaju tri mjere:
+
+1. **Neto sentiment**: razlika između deeskalacijskih i eskalacijskih pojmova
+2. **Omjer sentimenta**: normalizirana razlika na skalu -1 do +1
+3. **ESI (Escalation Index)**: invertirani i normalizirani omjer na skalu 0-100
+
+::: {.callout-note collapse="true" title="Tehnička metodologija sentiment analize"}
+
+**Formule:**
+
+$$
+\text{Neto sentiment}_t = \sum_{d \in D} \text{count}_{d,t} - \sum_{e \in E} \text{count}_{e,t}
+$$
+
+gdje je $D$ skup deeskalacijskih pojmova, a $E$ skup eskalacijskih pojmova.
+
+$$
+\text{Omjer sentimenta}_t = \frac{\text{Deeskalacija}_t - \text{Eskalacija}_t}{\text{Deeskalacija}_t + \text{Eskalacija}_t}
+$$
+
+**Intenzitet jezika:**
+
+Dodatno se mjeri intenzitet geopolitičkog jezika korištenjem leksikona intenziteta:
+
+- Visoki intenzitet: "značajan", "drastičan", "masivan", "razoran"
+- Niski intenzitet: "minimalan", "simboličan", "marginalan"
+
+$$
+\text{Intenzitet}_{net,t} = \text{Visoki}_t - \text{Niski}_t
+$$
+
+**Tipovi aktera:**
+
+Analiza obuhvaća i klasifikaciju spominjanih aktera:
+
+- Državni: vlade, predsjednici, ministri, vojska
+- Nedržavni: pobunjenici, teroristi, milicije
+- Međunarodni: UN, NATO, EU, koalicije
+
+:::
 
 ```{r sentiment-components}
 #| label: sentiment-components
@@ -1164,6 +1600,8 @@ p_sent1 / p_sent2 / p_sent3
 
 ## Tipovi aktera
 
+Na sljedećem grafikonu se prikazuje relativna zastupljenost različitih tipova aktera u geopolitičkom diskursu kroz vrijeme. Ova analiza omogućuje praćenje fokusa medija na državne aktere (vlade, vojska), nedržavne aktere (pobunjenici, teroristi) i međunarodne institucije.
+
 ```{r actor-types}
 #| label: actor-types
 #| fig-cap: "Tipovi aktera u geopolitičkom diskursu"
@@ -1190,26 +1628,54 @@ ggplot(actor_long, aes(x = yearmonth, y = Frekvencija, fill = Tip)) +
   theme(legend.position = "bottom")
 ```
 
-## Uncertainty vs Escalation scatter
-
-```{r uncertainty-escalation-scatter}
-#| label: uncertainty-escalation-scatter
-#| fig-cap: "Odnos neizvjesnosti i eskalacije"
-#| fig-height: 6
-
-ggplot(monthly, aes(x = GUI, y = ESI)) +
-  geom_point(aes(size = N, color = yearmonth), alpha = 0.7) +
-  geom_smooth(method = "lm", se = TRUE, color = pal$primary) +
-  scale_color_viridis_c(option = "viridis", labels = function(x) format(as.Date(x, origin = "1970-01-01"), "%b %Y")) +
-  labs(
-    title = "Neizvjesnost vs Eskalacija",
-    x = "Geopolitical Uncertainty Index", y = "Escalation Index",
-    size = "Broj članaka", color = "Mjesec"
-  ) +
-  theme(legend.position = "right")
-```
-
 # Volatilnost i momentum
+
+## Konstrukcija mjera volatilnosti i momenta
+
+Volatilnost i momentum se koriste za procjenu stabilnosti i smjera kretanja geopolitičkih indeksa. Volatilnost mjeri koliko indeks varira u kratkom roku, dok momentum mjeri smjer i intenzitet promjene.
+
+**Volatilnost** se izračunava kao standardna devijacija indeksa u kliznom prozoru od 3 mjeseca. Viša volatilnost ukazuje na nestabilniji geopolitički kontekst s čestim promjenama intenziteta.
+
+**Momentum** se izračunava kao razlika između trenutne vrijednosti i vrijednosti u prethodnom razdoblju. Pozitivan momentum ukazuje na rastući trend, dok negativan momentum ukazuje na padajući trend.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija volatilnosti i momenta"}
+
+**Formula za volatilnost (3M rolling SD):**
+
+$$
+\text{Vol}_{t} = \sqrt{\frac{1}{2}\sum_{i=t-2}^{t}(x_i - \bar{x}_{t-2:t})^2}
+$$
+
+gdje je $\bar{x}_{t-2:t}$ prosjek vrijednosti u prozoru od 3 mjeseca.
+
+**Formula za mjesečni momentum:**
+
+$$
+\text{Mom}_{1M,t} = x_t - x_{t-1}
+$$
+
+**Formula za tromjesečni momentum:**
+
+$$
+\text{Mom}_{3M,t} = x_t - x_{t-3}
+$$
+
+**Interpretacija:**
+
+- Visoka volatilnost + pozitivan momentum: brzi rast s nestabilnošću
+- Visoka volatilnost + negativan momentum: brzi pad s nestabilnošću
+- Niska volatilnost + pozitivan momentum: stabilan rast
+- Niska volatilnost + negativan momentum: stabilan pad
+
+**Primjena:**
+
+Kombinacija volatilnosti i momenta omogućuje razlikovanje:
+
+- Strukturnih promjena (trajni pomaci u razini aktivnosti)
+- Cikličkih fluktuacija (povratne oscilacije oko trenda)
+- Šokova (nagle kratkotrajne promjene)
+
+:::
 
 ```{r volatility-momentum}
 #| label: volatility-momentum
@@ -1262,6 +1728,46 @@ p_vol / p_mom / p_mom3 / p_combined
 
 # Koncentracija tema
 
+## Konstrukcija mjera koncentracije
+
+Koncentracija tema mjeri koliko je medijski diskurs fokusiran na mali broj tema nasuprot disperziji na mnogo tema. Za mjerenje koncentracije koristi se Herfindahl-Hirschman indeks (HHI).
+
+**Visoki HHI** (bliže 1) ukazuje na fokus medija na jednu ili nekoliko dominantnih tema, što je tipično za razdoblja velikih kriza kada jedna tema dominira (npr. početak rata).
+
+**Niski HHI** (bliže 0) ukazuje na disperziju pažnje na mnogo tema, što je tipično za mirnija razdoblja ili višestruke istovremene krize.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija koncentracije tema"}
+
+**Herfindahl-Hirschman Index (HHI):**
+
+$$
+\text{HHI}_t = \sum_{s=1}^{S} \left(\frac{x_{s,t}}{\sum_{s=1}^{S} x_{s,t}}\right)^2
+$$
+
+gdje je $x_{s,t}$ vrijednost sektora $s$ u mjesecu $t$, a $S$ broj sektora.
+
+**Interpretacija HHI:**
+
+- HHI = 1: potpuna koncentracija (samo jedna tema)
+- HHI = 1/S: potpuna disperzija (sve teme jednako zastupljene)
+- Za S = 12 sektora, minimalni HHI ≈ 0.083
+
+**Broj aktivnih tema:**
+
+Dodatno se prati broj sektora s pozitivnom aktivnošću:
+
+$$
+\text{Aktivne teme}_t = \sum_{s=1}^{S} \mathbb{1}(x_{s,t} > 0)
+$$
+
+**Primjena:**
+
+- Rastući HHI: fokusiranje pažnje na dominantnu temu
+- Padajući HHI: disperzija pažnje ili pojava novih tema
+- Nagli skok HHI: izbijanje nove dominantne krize
+
+:::
+
 ```{r topic-concentration}
 #| label: topic-concentration
 #| fig-cap: "Koncentracija geopolitičkih tema"
@@ -1296,6 +1802,8 @@ p_hhi / p_count
 ```
 
 # Korelacije između indeksa
+
+U sljedećoj tablici se prikazuje korelacijska matrica svih konstruiranih geopolitičkih indeksa. Korelacije omogućuju razumijevanje međusobnih odnosa između različitih aspekata geopolitičkog rizika.
 
 ```{r index-correlations}
 #| label: index-correlations
@@ -1389,6 +1897,8 @@ cat("Excel exportiran:", output_path, "\n")
 
 # Sažetak
 
+U ovoj analizi je konstruirano deset geopolitičkih indeksa temeljenih na semantičkoj analizi medijskog diskursa. Indeksi obuhvaćaju različite aspekte geopolitičkog rizika: ukupnu aktivnost (GRI), intenzitet sukoba (CII), razinu eskalacije (ESI), neizvjesnost (GUI), prognostičku orijentaciju (FGI), regionalne napetosti (RTI_E, METI), aktivnost zapadnih saveza (WAI), vojnu aktivnost (MAI) i sintetičku mjeru temeljenu na PCA (PCI).
+
 ```{r summary}
 #| label: summary
 
@@ -1423,4 +1933,4 @@ kable(summary_table, caption = "Sažetak geopolitičke analize") %>%
 
 *Izvještaj generiran: `r Sys.time()`*
 
-*GIMES Research | Semantički indeks geopolitičke nestabilnosti v1.0*
+*GIMES Research | Semantički indeks geopolitičke nestabilnosti v2.0*

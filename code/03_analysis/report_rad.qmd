@@ -19,6 +19,7 @@ format:
 execute:
   warning: false
   message: false
+  echo: false
 lang: hr
 ---
 
@@ -60,7 +61,7 @@ pal <- list(
 
 # Uvod
 
-Ovaj dokument konstruira semantičke indekse tržišta rada temeljene na analizi medijskog diskursa o zapošljavanju, plaćama, radnim uvjetima i povezanim temama.
+U ovom dokumentu se konstruiraju semantički indeksi tržišta rada temeljeni na analizi medijskog diskursa o zapošljavanju, plaćama, radnim uvjetima i povezanim temama. Metodologija se temelji na brojanju pojmova iz unaprijed definirane semantičke taksonomije, pri čemu se za svaki članak zbrajaju pojavljivanja relevantnih pojmova, a zatim se provodi mjesečna agregacija i normalizacija.
 
 ```{r load-data}
 #| label: load-data
@@ -93,6 +94,8 @@ cat("Vremenski raspon:", as.character(date_min), "do", as.character(date_max), "
 ```
 
 # Eksploratorni pregled
+
+U ovom poglavlju se prikazuju osnovne deskriptivne statistike dataseta. Analizom se obuhvaćaju broj članaka, vremenski raspon, distribucija izvora i dinamika objavljivanja kroz vrijeme.
 
 ```{r basic-stats}
 #| label: basic-stats
@@ -158,6 +161,36 @@ ggplot(monthly_count, aes(x = yearmonth)) +
 # Semantička taksonomija tržišta rada
 
 ## Hijerarhijska struktura pojmova
+
+Semantička taksonomija se organizira u hijerarhijsku strukturu s makro kategorijama (npr. zaposlenost, plaće) i meso kategorijama (npr. nezaposlenost, minimalna plaća). Za svaku kategoriju se definira skup regularnih izraza (regex pattern) koji obuhvaćaju relevantne pojmove i njihove morfološke varijante.
+
+Pojmovi se definiraju pomoću korijena riječi (stem) kako bi se osigurala šira morfološka pokrivenost. Na primjer, korijen "zaposlen" će prepoznati "zaposlenost", "zaposleni", "zaposlenih", "zaposlenike" itd.
+
+::: {.callout-note collapse="true" title="Detaljna metodologija semantičke taksonomije"}
+
+**Princip konstrukcije taksonomije:**
+
+1. **Makro kategorije** predstavljaju široke tematske domene tržišta rada (npr. zaposlenost, plaće, radni odnosi)
+2. **Meso kategorije** predstavljaju specifičnije podteme unutar makro kategorija
+3. **Regex uzorci** se koriste za fleksibilno prepoznavanje morfoloških varijanti
+
+**Morfološka pokrivenost:**
+
+Za hrvatski jezik koji ima bogatu morfologiju, koriste se:
+
+- Korijenski oblici s opcionalnim nastavcima: `zaposlen[aeiou]+` prepoznaje zaposlenost, zaposleni, zaposlenih
+- Alternativni oblici: `(plaća|primanje)` prepoznaje oba sinonima
+- Wildcard znakovi: `.{0,10}` dopušta do 10 bilo kojih znakova između riječi
+
+**Formula za brojanje:**
+
+$$
+\text{count}_{c,d} = \sum_{p \in P_c} \text{matches}(p, d)
+$$
+
+gdje je $P_c$ skup regex uzoraka za kategoriju $c$, a $d$ je tekst dokumenta.
+
+:::
 
 ```{r semantic-taxonomy}
 #| label: semantic-taxonomy
@@ -445,75 +478,128 @@ tax_summary <- rbindlist(lapply(names(labor_taxonomy), function(macro) {
     )
   }))
 }))
+```
+
+<details>
+<summary>**Kliknite za prikaz kompletne tablice semantičke taksonomije**</summary>
+
+```{r taxonomy-table}
+#| label: taxonomy-table
 
 kable(tax_summary, caption = "Struktura semantičke taksonomije tržišta rada") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
-## Sentiment i neizvjesnost leksikoni
+</details>
+
+## Leksikoni sentimenta i neizvjesnosti
+
+Za mjerenje sentimenta i neizvjesnosti na tržištu rada koriste se specijalizirani leksikoni. Leksikon sentimenta se dijeli na pozitivne i negativne pojmove specifične za tržište rada, dok leksikon neizvjesnosti obuhvaća pojmove koji signaliziraju nesigurnost zaposlenja i ekonomsku neizvjesnost. Svi pojmovi se definiraju pomoću korijena riječi (stem) kako bi se osigurala šira morfološka pokrivenost.
+
+::: {.callout-note collapse="true" title="Detaljna metodologija leksikona"}
+
+**Pozitivan sentiment na tržištu rada** se mjeri brojenjem pojmova koji signaliziraju poboljšanje uvjeta, rast zapošljavanja i povećanje plaća. Koriste se korijenski oblici riječi poput `rast.{0,10}zaposlen`, `nova.{0,10}radn.{0,10}mjest`, `povi[sš]ic`, `napredovanj`.
+
+**Negativan sentiment** se mjeri brojenjem pojmova koji signaliziraju pogoršanje uvjeta, gubitak posla i ekonomske poteškoće. Koriste se korijenski oblici poput `otpu[sš]tanj`, `otkaz`, `gubitak.{0,10}posl`, `ste[cč]aj`, `emigracij`.
+
+**Formula za neto sentiment:**
+
+$$
+\text{Sentiment}_{net} = \text{Pozitivno} - \text{Negativno}
+$$
+
+**Formula za omjer sentimenta:**
+
+$$
+\text{Sentiment}_{ratio} = \frac{\text{Pozitivno} - \text{Negativno}}{\text{Pozitivno} + \text{Negativno}}
+$$
+
+Vrijednosti omjera se kreću od -1 (potpuno negativan sentiment) do +1 (potpuno pozitivan sentiment).
+
+**Neizvjesnost na tržištu rada** se mjeri brojenjem pojmova koji signaliziraju nesigurnost zaposlenja, mogućnost otkaza i ekonomsku nestabilnost.
+
+:::
 
 ```{r sentiment-uncertainty-lexicons}
 #| label: sentiment-uncertainty-lexicons
 
-# Labor market sentiment leksikon (pozitivno/negativno)
+# Labor market sentiment leksikon (pozitivno/negativno) - STEMMED VERSION
 labor_sentiment_lexicon <- list(
   positive = c(
-    "rast zaposlenosti", "nova radna mjesta", "zapošljavanje", "povećanje plaća",
-    "rast plaća", "povišica", "napredovanje", "unapređenje", "stabilnost",
-    "pad nezaposlenosti", "smanjenje nezaposlenosti", "oporavak tržišta rada",
-    "deficitarna zanimanja", "traženi kadrovi", "konkurentne plaće",
-    "poboljšanje uvjeta", "socijalni dijalog", "dogovor", "sporazum",
-    "otvaranje radnih mjesta", "investicije", "širenje poslovanja",
-    "zapošljava", "traži radnike", "nedostaje radnika", "produktivnost raste"
+    # Pozitivni pojmovi - korijenski oblici
+    "rast.{0,10}zaposlen[aeiou]*", "nov[aeiou]+.{0,10}radn[aeiou]+.{0,10}mjest[aeiou]*", 
+    "zapo[sš]ljavanj[aeiou]*", "pove[cć]anj[aeiou]+.{0,10}pla[cć]", "rast.{0,10}pla[cć]", 
+    "povi[sš]ic[aeiou]*", "napredovanj[aeiou]*", "unapre[dđ]enj[aeiou]*", 
+    "stabilnost[aeiou]*", "pad.{0,10}nezaposlen[aeiou]*", "smanj[aeiou]+.{0,10}nezaposlen",
+    "oporavak.{0,10}tr[zž]i[sš]t[aeiou]+.{0,10}rad", "deficitarn[aeiou]+.{0,10}zanimanj",
+    "tra[zž]en[aeiou]+.{0,10}kadr", "konkurentn[aeiou]+.{0,10}pla[cć]",
+    "pobolj[sš]anj[aeiou]+.{0,10}uvjet", "socijalni.{0,10}dijalog", 
+    "dogovor[aeiou]*", "sporazum[aeiou]*", "otvaranj[aeiou]+.{0,10}radn[aeiou]+.{0,10}mjest",
+    "investicij[aeiou]*", "[sš]irenj[aeiou]+.{0,10}poslovanj", "zapo[sš]ljav[aeiou]*",
+    "tra[zž]i.{0,10}radnik", "nedostaj[aeiou]+.{0,10}radnik", "produktivnost.{0,10}rast"
   ),
   negative = c(
-    "pad zaposlenosti", "rast nezaposlenosti", "otpuštanje", "otkazi",
-    "gubitak posla", "višak radnika", "smanjenje plaća", "rezanje troškova",
-    "zatvaranje", "stečaj", "bankrot", "likvidacija", "restrukturiranje",
-    "štrajk", "obustava rada", "prosvjed", "nesigurnost zaposlenja",
-    "prekarni rad", "siva ekonomija", "rad na crno", "neplaćeni prekovremeni",
-    "iseljavanje", "odljev mozgova", "emigracija", "nedostatak perspektive",
-    "diskriminacija", "mobbing", "zlostavljanje na radu"
+    # Negativni pojmovi - korijenski oblici
+    "pad.{0,10}zaposlen[aeiou]*", "rast.{0,10}nezaposlen[aeiou]*", "otpu[sš]tanj[aeiou]*", 
+    "otkaz[aeiou]*", "gubitak.{0,10}posl[aeiou]*", "vi[sš]ak.{0,10}radn[aeiou]*", 
+    "smanj[aeiou]+.{0,10}pla[cć]", "rezanj[aeiou]+.{0,10}tro[sš]k", "zatvaranj[aeiou]*", 
+    "ste[cč]aj[aeiou]*", "bankrot[aeiou]*", "likvidacij[aeiou]*", "restrukturiranj[aeiou]*",
+    "[sš]trajk[aeiou]*", "obustav[aeiou]+.{0,10}rad", "prosvjed[aeiou]*", 
+    "nesigurnost.{0,10}zaposlenj", "prekarn[aeiou]+.{0,10}rad", "siv[aeiou]+.{0,10}ekonomij",
+    "rad.{0,10}na.{0,10}crno", "nepla[cć]en[aeiou]+.{0,10}prekovrem",
+    "iseljav[aeiou]*", "odljev.{0,10}mozgov", "emigracij[aeiou]*", 
+    "nedostat[aeikou]+.{0,10}perspektiv", "diskriminacij[aeiou]*", "mobbing[aeiou]*", 
+    "zlostavljanj[aeiou]+.{0,10}rad"
   )
 )
 
-# Labor market uncertainty leksikon
+# Labor market uncertainty leksikon - STEMMED VERSION
 labor_uncertainty_lexicon <- c(
-  "neizvjesnost", "nesigurnost", "rizik", "nestabilnost", "volatilnost",
-  "mogući otkazi", "potencijalno otpuštanje", "upitno", "nejasno",
-  "pregovori", "štrajk u najavi", "mogući štrajk", "tenzije",
-  "restrukturiranje", "reorganizacija", "spajanje", "akvizicija",
-  "automatizacija", "robotizacija", "zamjena radnika",
-  "sezonalnost", "privremeni ugovor", "istječe ugovor",
-  "kriza", "recesija", "usporavanje"
+  # Neizvjesnost - korijenski oblici
+  "neizvjesnost[aeiou]*", "nesigurnost[aeiou]*", "rizik[aeiou]*", "nestabilnost[aeiou]*", 
+  "volatilnost[aeiou]*", "mogu[cć][aeiou]+.{0,10}otkaz", "potencijalno.{0,10}otpu[sš]t",
+  "upitn[aeiou]*", "nejasn[aeiou]*", "pregovor[aeiou]*", "[sš]trajk.{0,10}u.{0,10}najav",
+  "mogu[cć][aeiou]+.{0,10}[sš]trajk", "tenzij[aeiou]*", "restrukturiranj[aeiou]*",
+  "reorganizacij[aeiou]*", "spajanj[aeiou]*", "akvizicij[aeiou]*",
+  "automatizacij[aeiou]*", "robotizacij[aeiou]*", "zamjen[aeiou]+.{0,10}radnik",
+  "sezonalnost[aeiou]*", "privremeni.{0,10}ugovor", "istje[cč][aeiou]+.{0,10}ugovor",
+  "kriz[aeiou]*", "recesij[aeiou]*", "usporavanj[aeiou]*"
 )
 
-# Labor market forward looking leksikon
+# Labor market forward looking leksikon - STEMMED VERSION
 labor_forward_lexicon <- c(
-  "planira zaposliti", "namjerava zaposliti", "otvorit će radna mjesta",
-  "očekuje se rast", "prognoza zaposlenosti", "plan zapošljavanja",
-  "strategija zapošljavanja", "buduća potražnja", "trendovi zapošljavanja",
-  "sljedeće godine", "iduće sezone", "očekivana plaća",
-  "projekcije", "scenariji", "planovi širenja", "investicijski planovi",
-  "reforma tržišta rada", "novi zakon o radu", "promjene u regulativi"
+  # Forward looking - korijenski oblici
+  "planira.{0,10}zaposli", "namjerav[aeiou]+.{0,10}zaposli", "otvorit.{0,10}[cć]e.{0,10}radn",
+  "o[cč]eku[aeiou]+.{0,10}rast", "prognoz[aeiou]+.{0,10}zaposlen", "plan.{0,10}zapo[sš]ljavanj",
+  "strategij[aeiou]+.{0,10}zapo[sš]ljavanj", "budu[cć][aeiou]+.{0,10}potra[zž]nj",
+  "trend[aeiou]+.{0,10}zapo[sš]ljavanj", "sljede[cć][aeiou]+.{0,10}godin",
+  "idu[cć][aeiou]+.{0,10}sezon", "o[cč]ekivan[aeiou]+.{0,10}pla[cć]",
+  "projekcij[aeiou]*", "scenarij[aeiou]*", "plan[aeiou]+.{0,10}[sš]irenj",
+  "investicijsk[aeiou]+.{0,10}plan", "reform[aeiou]+.{0,10}tr[zž]i[sš]t[aeiou]+.{0,10}rad",
+  "nov[aeiou]+.{0,10}zakon.{0,10}rad", "promjen[aeiou]+.{0,10}regulativ"
 )
 
-# Labor market intensity leksikon
+# Labor market intensity leksikon - STEMMED VERSION
 labor_intensity_lexicon <- list(
   high = c(
-    "značajan rast", "drastično povećanje", "rekordan broj",
-    "masovna otpuštanja", "drastično smanjenje", "kritičan nedostatak",
-    "alarmantno", "hitno", "izvanredno", "najviše u povijesti",
-    "najniže ikad", "eksplozivan rast", "kolaps"
+    # Visoki intenzitet - korijenski oblici
+    "zna[cč]ajan.{0,10}rast", "drasti[cč]n[aeiou]+.{0,10}pove[cć]anj", 
+    "rekordan.{0,10}broj", "masovn[aeiou]+.{0,10}otpu[sš]tanj",
+    "drasti[cč]n[aeiou]+.{0,10}smanj", "kriti[cč]an.{0,10}nedostat",
+    "alarmantn[aeiou]*", "hitn[aeiou]*", "izvanredn[aeiou]*", 
+    "najvi[sš][aeiou]+.{0,10}u.{0,10}povijesti", "najni[zž][aeiou]+.{0,10}ikad",
+    "eksplozivan.{0,10}rast", "kolaps[aeiou]*"
   ),
   moderate = c(
-    "umjeren rast", "blagi porast", "postupno povećanje",
-    "stabilno", "konstantno", "uobičajeno", "prosječno",
-    "u skladu s očekivanjima", "normalizirano"
+    # Umjereni intenzitet - korijenski oblici
+    "umjeren.{0,10}rast", "blag[aeiou]+.{0,10}porast", "postupn[aeiou]+.{0,10}pove[cć]anj",
+    "stabiln[aeiou]*", "konstantn[aeiou]*", "uobi[cč]ajen[aeiou]*", "prosje[cč]n[aeiou]*",
+    "u.{0,10}skladu.{0,10}s.{0,10}o[cč]ekivanj", "normaliziran[aeiou]*"
   ),
   low = c(
-    "minimalan", "zanemariv", "neznatan", "marginalan",
-    "simboličan", "tek neznatno", "jedva primjetan"
+    # Niski intenzitet - korijenski oblici
+    "minimaln[aeiou]*", "zanemariv[aeiou]*", "neznatan[aeiou]*", "marginaln[aeiou]*",
+    "simboli[cč]n[aeiou]*", "tek.{0,10}neznatn[aeiou]*", "jedva.{0,10}primjet[aeiou]*"
   )
 )
 
@@ -524,6 +610,8 @@ cat("Definirano", length(labor_forward_lexicon), "labor forward looking pojmova\
 ```
 
 ## Brojanje pojmova
+
+Za svaki članak se zbrajaju pojavljivanja pojmova iz svake kategorije. Brojanje se provodi korištenjem regularnih izraza (regex) koji prepoznaju morfološke varijante pojmova. Rezultati se agregiraju na razini makro kategorija zbrajanjem svih pripadajućih meso kategorija.
 
 ```{r count-terms}
 #| label: count-terms
@@ -583,6 +671,8 @@ cat("Izračunato", length(sem_cols), "semantičkih varijabli\n")
 
 ## Mjesečna agregacija
 
+Podaci se agregiraju na mjesečnoj razini kako bi se omogućila analiza vremenskih trendova. Za svaki mjesec se izračunavaju zbroji i prosjeci svih varijabli tržišta rada, te se dodaju pomoćne mjere poput broja članaka i prosječne duljine teksta.
+
 ```{r monthly-aggregation}
 #| label: monthly-aggregation
 
@@ -607,40 +697,11 @@ monthly[, articles_per_source := N / unique_sources]
 cat("Agregirano", nrow(monthly), "mjeseci podataka\n")
 ```
 
-## TF IDF ponderiranje
-
-```{r tfidf-weights}
-#| label: tfidf-weights
-
-# Izračunaj IDF za svaku kategoriju
-calc_idf <- function(monthly_data, col_name) {
-  N <- nrow(monthly_data)
-  df <- sum(monthly_data[[col_name]] > 0, na.rm = TRUE)
-  if (df == 0) return(0)
-  log(N / df)
-}
-
-idf_weights <- sapply(macro_cols, function(col) calc_idf(monthly, col))
-idf_weights <- idf_weights / max(idf_weights, na.rm = TRUE)
-
-# TF-IDF ponderirani score za svaki mjesec
-for (col in macro_cols) {
-  tfidf_col <- paste0(col, "_tfidf")
-  monthly[, (tfidf_col) := (get(col) / total_words) * idf_weights[col] * 1000]
-}
-
-tfidf_cols <- paste0(macro_cols, "_tfidf")
-
-idf_table <- data.table(
-  Kategorija = gsub("macro_", "", macro_cols),
-  IDF_weight = round(idf_weights, 3)
-)[order(-IDF_weight)]
-
-kable(idf_table, caption = "IDF težine po kategorijama (veća = diskriminativnija)") %>%
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
-```
-
 ## Definicija labor indeksa
+
+U ovom poglavlju se definira dvanaest indeksa tržišta rada. Svaki indeks se konstruira na temelju specifične kombinacije varijabli i normalizira se na skalu 0-100. Normalizacija se provodi korištenjem min-max skaliranja kako bi se omogućila usporedivost indeksa kroz vrijeme.
+
+### Pregled indeksa
 
 ```{r construct-indices}
 #| label: construct-indices
@@ -755,7 +816,9 @@ for (idx in index_cols) {
 cat("Konstruirano", length(index_cols), "indeksa\n")
 ```
 
-## Opis indeksa
+### Detaljni opis indeksa
+
+U nastavku se pruža detaljan opis svakog od dvanaest konstruiranih indeksa. Za svaki indeks se navodi formula, interpretacija vrijednosti i praktična primjena.
 
 ```{r index-descriptions}
 #| label: index-descriptions
@@ -798,9 +861,321 @@ kable(index_desc_filtered, caption = "Pregled konstruiranih labor indeksa") %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
+#### Labor Volume Index (LVI)
+
+LVI mjeri ukupnu razinu medijske pozornosti usmjerene na teme tržišta rada. Indeks se izračunava kao zbroj svih pojmova tržišta rada normaliziran po broju članaka u danom mjesecu. Viša vrijednost ukazuje na intenzivnije pokrivanje tema tržišta rada u medijima.
+
+$$
+\text{LVI}_t = \text{normalize}_{0-100}\left(\frac{\sum_{c \in C} \text{count}_{c,t}}{N_t}\right)
+$$
+
+gdje je $C$ skup svih kategorija tržišta rada, $\text{count}_{c,t}$ zbroj pojmova kategorije $c$ u mjesecu $t$, a $N_t$ broj članaka u mjesecu $t$.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija LVI"}
+
+**Normalizacija:** Koristi se min-max skaliranje na raspon 0-100:
+
+$$
+\text{normalize}(x) = \frac{x - \min(x)}{\max(x) - \min(x)} \times 100
+$$
+
+**Interpretacija vrijednosti:**
+
+- 0-25: Niska medijska pozornost na tržište rada
+- 25-50: Umjerena medijska pozornost
+- 50-75: Povišena medijska pozornost
+- 75-100: Visoka medijska pozornost (razdoblja reformi, kriza ili značajnih promjena)
+
+**Prednosti i ograničenja:**
+
+- Obuhvaća sve teme tržišta rada jednako
+- Normalizacija po broju članaka kontrolira za varijacije u volumenu vijesti
+- Ne razlikuje pozitivno od negativnog izvještavanja
+
+:::
+
+#### Employment Dynamics Index (EDI)
+
+EDI mjeri dinamiku zapošljavanja i otpuštanja na tržištu rada. Indeks kombinira kategorije zaposlenost i dinamika_rada, obuhvaćajući pojmove vezane uz stopu zaposlenosti, nezaposlenost, nova zapošljavanja i otpuštanja.
+
+$$
+\text{EDI}_t = \text{normalize}_{0-100}\left(\frac{\text{Zaposlenost}_t + \text{Dinamika}_t}{2 \cdot N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija EDI"}
+
+**Komponente:**
+
+- Zaposlenost: stope zaposlenosti/nezaposlenosti, HZZ podaci
+- Dinamika rada: zapošljavanje, otpuštanje, oglasi za posao, fluktuacija
+
+**Interpretacija:**
+
+- Visoki EDI: intenzivna rasprava o dinamici zapošljavanja
+- Rastući EDI: povećana aktivnost na tržištu rada (bilo pozitivna ili negativna)
+- EDI treba interpretirati zajedno s LSI za razumijevanje smjera promjena
+
+:::
+
+#### Wage Pressure Index (WPI)
+
+WPI mjeri intenzitet medijske rasprave o plaćama i primanjima. Indeks se fokusira na makro kategoriju plaće koja obuhvaća prosječne plaće, minimalne plaće, neto/bruto razlike, rast plaća i realne plaće.
+
+$$
+\text{WPI}_t = \text{normalize}_{0-100}\left(\frac{\text{Plaće}_t}{N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija WPI"}
+
+**Komponente makro kategorije plaće:**
+
+- Opći pojmovi: plaća, primanja, zarada, dohodak
+- Prosječna plaća: prosjek, medijan
+- Minimalna plaća: minimalac, najniža plaća
+- Neto/bruto: razlike u izračunu
+- Rast plaća: povišica, revalorizacija
+- Realne plaće: kupovna moć, inflacija
+
+**Primjena:**
+
+WPI je koristan za praćenje pritiska na rast plaća, pregovora o minimalnoj plaći i rasprava o životnom standardu.
+
+:::
+
+#### Labor Market Tightness Index (LMTI)
+
+LMTI mjeri napetost na tržištu rada, odnosno koliko je teško pronaći radnike. Indeks kombinira pojmove vezane uz strane radnike, deficitarna zanimanja i neusklađenost vještina. Viša vrijednost ukazuje na veći pritisak potražnje za radnicima.
+
+$$
+\text{LMTI}_t = \text{normalize}_{0-100}\left(\frac{\text{Strani radnici}_t + \text{Deficitarna}_t + \text{Neusklađenost}_t}{N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija LMTI"}
+
+**Komponente:**
+
+- Strani radnici: uvoz radne snage, radne dozvole, kvote
+- Deficitarna zanimanja: tražena zanimanja, nedostatak kadrova, IT stručnjaci
+- Neusklađenost: skill gap, skill mismatch
+
+**Interpretacija:**
+
+- Visoki LMTI: tržište rada je napeto, poslodavci imaju poteškoća s pronalaskom radnika
+- Rastući LMTI: povećanje potražnje za radnicima ili odljev radne snage
+- LMTI može biti vodeći indikator pritiska na rast plaća
+
+**Povezanost s ekonomskim ciklusom:**
+
+LMTI tipično raste u ekspanzijskoj fazi ekonomskog ciklusa i pada tijekom recesije.
+
+:::
+
+#### Labor Sentiment Index (LSI)
+
+LSI mjeri sentiment medijskog diskursa o tržištu rada. Indeks kombinira ukupni volumen s omjerom pozitivnih i negativnih pojmova, pružajući mjeru ne samo količine već i tona izvještavanja.
+
+$$
+\text{LSI}_t = \text{normalize}_{0-100}\left(\frac{\text{Volumen}_t}{N_t} \times (1 + \text{Sentiment}_{ratio,t})\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija LSI"}
+
+**Sentiment prilagodba:**
+
+Multiplikator $(1 + \text{Sentiment}_{ratio})$ povećava ili smanjuje indeks ovisno o tonu izvještavanja:
+
+- Pozitivan sentiment (ratio > 0): povećava LSI
+- Negativan sentiment (ratio < 0): smanjuje LSI
+- Neutralan sentiment (ratio ≈ 0): bez promjene
+
+**Referentna vrijednost:**
+
+- LSI = 50: neutralan diskurs
+- LSI > 50: dominira pozitivan sentiment o tržištu rada
+- LSI < 50: dominira negativan sentiment
+
+**Primjena:**
+
+LSI je posebno koristan za praćenje promjena u percepciji stanja na tržištu rada tijekom ekonomskih ciklusa.
+
+:::
+
+#### Labor Uncertainty Index (LUI)
+
+LUI mjeri razinu neizvjesnosti na tržištu rada. Indeks se temelji na frekvenciji pojmova koji signaliziraju nesigurnost zaposlenja, mogućnost otkaza, restrukturiranja i ekonomsku nestabilnost.
+
+$$
+\text{LUI}_t = \text{normalize}_{0-100}\left(\frac{\text{Neizvjesnost}_t}{N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija LUI"}
+
+**Kategorije neizvjesnosti:**
+
+1. Nesigurnost zaposlenja: mogući otkazi, potencijalno otpuštanje
+2. Strukturne promjene: restrukturiranje, reorganizacija, spajanja
+3. Tehnološke prijetnje: automatizacija, robotizacija
+4. Ekonomska neizvjesnost: kriza, recesija, usporavanje
+5. Ugovorna nesigurnost: privremeni ugovori, sezonalnost
+
+**Interpretacija:**
+
+- Visoki LUI: povećana neizvjesnost na tržištu rada
+- LUI raste prije ekonomskih kriza
+- LUI može služiti kao vodeći indikator pogoršanja uvjeta na tržištu rada
+
+:::
+
+#### Labor Forward Looking Index (LFLI)
+
+LFLI mjeri orijentaciju medijskog diskursa prema budućim očekivanjima na tržištu rada. Indeks obuhvaća pojmove koji signaliziraju planove zapošljavanja, prognoze i buduće trendove.
+
+$$
+\text{LFLI}_t = \text{normalize}_{0-100}\left(\frac{\text{Forward}_t}{N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija LFLI"}
+
+**Kategorije forward looking pojmova:**
+
+1. Planovi zapošljavanja: planira zaposliti, otvorit će radna mjesta
+2. Prognoze: očekuje se rast, projekcije zaposlenosti
+3. Strategije: strategija zapošljavanja, investicijski planovi
+4. Reforme: reforma tržišta rada, promjene u regulativi
+
+**Primjena:**
+
+LFLI je koristan za procjenu koliko je medijski diskurs orijentiran prema anticipaciji budućih promjena nasuprot izvještavanju o trenutnom stanju.
+
+:::
+
+#### Social Protection Index (SPI)
+
+SPI mjeri intenzitet medijske pokrivenosti tema socijalne zaštite. Indeks se fokusira na mirovine, naknade za nezaposlene i doprinose.
+
+$$
+\text{SPI}_t = \text{normalize}_{0-100}\left(\frac{\text{Socijalna zaštita}_t}{N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija SPI"}
+
+**Komponente:**
+
+- Mirovine: mirovinski sustav, HZMO, mirovinski stupovi
+- Naknade: naknada za nezaposlene, socijalna pomoć
+- Doprinosi: porezi na dohodak, porezni klin
+
+**Interpretacija:**
+
+SPI raste tijekom rasprava o mirovinskim reformama, promjenama naknada ili poreznog sustava.
+
+:::
+
+#### Labor Relations Index (LRI)
+
+LRI mjeri intenzitet rasprave o radnim odnosima, sindikatima i industrijskim akcijama. Viša vrijednost ukazuje na pojačanu aktivnost socijalnog dijaloga ili industrijskih sukoba.
+
+$$
+\text{LRI}_t = \text{normalize}_{0-100}\left(\frac{\text{Radni odnosi}_t}{N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija LRI"}
+
+**Komponente:**
+
+- Ugovori o radu: neodređeno/određeno vrijeme
+- Sindikati: sindikalna aktivnost, kolektivni ugovori
+- Štrajkovi: obustave rada, industrijske akcije
+- Socijalni dijalog: GSV, tripartitni pregovori
+
+**Primjena:**
+
+LRI je koristan za praćenje ciklusa kolektivnih pregovora i industrijskih akcija.
+
+:::
+
+#### Vulnerable Groups Index (VGI)
+
+VGI mjeri pokrivenost tema vezanih uz ranjive skupine na tržištu rada: mlade, žene, osobe s invaliditetom i dugotrajno nezaposlene.
+
+$$
+\text{VGI}_t = \text{normalize}_{0-100}\left(\frac{\text{Ranjive skupine}_t}{N_t}\right)
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija VGI"}
+
+**Komponente:**
+
+- Mladi: nezaposlenost mladih, pripravništvo, NEET
+- Žene: rodni jaz, gender gap, zapošljavanje majki
+- Osobe s invaliditetom: kvote zapošljavanja, prilagodbe
+- Dugotrajno nezaposleni: programi aktivacije
+
+**Primjena:**
+
+VGI je koristan za praćenje fokusa javne politike na socijalno uključivanje na tržištu rada.
+
+:::
+
+#### Principal Component Index (PCI)
+
+PCI se konstruira korištenjem analize glavnih komponenata (PCA) na svim makro kategorijama. Prva glavna komponenta se koristi kao sintetički indeks koji maksimalno objašnjava varijabilitet svih tema tržišta rada.
+
+$$
+\text{PCI}_t = \text{normalize}_{0-100}\left(\sum_{i=1}^{k} w_i \cdot z_{i,t}\right)
+$$
+
+gdje su $w_i$ težine iz prve glavne komponente, a $z_{i,t}$ standardizirane vrijednosti makro kategorija.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija PCI"}
+
+**Postupak konstrukcije:**
+
+1. Standardizacija svih makro kategorija (z-score)
+2. Izračun kovarijacijske/korelacijske matrice
+3. Dekompozicija na svojstvene vrijednosti i vektore
+4. Odabir prve glavne komponente
+5. Projekcija podataka na prvu komponentu
+6. Normalizacija na skalu 0-100
+
+**Prednosti:**
+
+- Objektivno ponderiranje tema prema njihovom doprinosu varijabilnosti
+- Reducira dimenzionalnost na jednu sintetičku mjeru
+- Koristi informaciju iz svih tema
+
+:::
+
+#### Composite Labor Index (CLI)
+
+CLI je kompozitni indeks koji kombinira četiri ključne dimenzije tržišta rada: volumen (LVI), dinamiku zapošljavanja (EDI), plaće (WPI) i sentiment (LSI). Indeks pruža sveobuhvatnu mjeru stanja na tržištu rada.
+
+$$
+\text{CLI}_t = \frac{\text{LVI}_t + \text{EDI}_t + \text{WPI}_t + \text{LSI}_t}{4}
+$$
+
+::: {.callout-note collapse="true" title="Tehnička metodologija CLI"}
+
+**Komponente:**
+
+- LVI: ukupna medijska pozornost
+- EDI: dinamika zapošljavanja
+- WPI: pritisak na plaće
+- LSI: sentiment
+
+**Prednosti kompozitnog pristupa:**
+
+- Uravnoteženo obuhvaća različite aspekte tržišta rada
+- Robusniji od pojedinih indeksa
+- Jednostavna interpretacija kao prosječna vrijednost
+
+:::
+
 # Vizualizacija indeksa
 
 ## Glavni labor indeksi
+
+Na sljedećim grafikonima se prikazuje dinamika glavnih indeksa tržišta rada kroz vrijeme. LVI i CLI prikazuju ukupnu aktivnost, EDI i WPI prikazuju dinamiku zapošljavanja i plaće, LSI prikazuje sentiment, a LUI prikazuje neizvjesnost.
 
 ```{r main-indices-plot}
 #| label: main-indices-plot
@@ -842,6 +1217,8 @@ p4 <- ggplot(monthly, aes(x = yearmonth)) +
 
 ## Labor Market Tightness
 
+LMTI prikazuje napetost na tržištu rada, odnosno intenzitet rasprave o nedostatku radnika i deficitarnim zanimanjima.
+
 ```{r tightness-plot}
 #| label: tightness-plot
 #| fig-cap: "Labor Market Tightness Index"
@@ -860,28 +1237,9 @@ if ("LMTI" %in% names(monthly)) {
 }
 ```
 
-## Wage vs Employment Dynamics
+## Socijalne dimenzije
 
-```{r wage-employment-scatter}
-#| label: wage-employment-scatter
-#| fig-cap: "Wage Pressure vs Employment Dynamics"
-#| fig-height: 6
-
-if (all(c("WPI", "EDI") %in% names(monthly))) {
-  ggplot(monthly, aes(x = EDI, y = WPI)) +
-    geom_point(aes(size = N, color = yearmonth), alpha = 0.7) +
-    geom_smooth(method = "lm", se = TRUE, color = pal$primary) +
-    scale_color_viridis_c(option = "viridis", labels = function(x) format(as.Date(x, origin = "1970-01-01"), "%b %Y")) +
-    labs(
-      title = "Wage Pressure vs Employment Dynamics",
-      x = "Employment Dynamics Index", y = "Wage Pressure Index",
-      size = "Broj članaka", color = "Mjesec"
-    ) +
-    theme(legend.position = "right")
-}
-```
-
-## Social dimensions
+Na sljedećim grafikonima se prikazuju indeksi socijalnih dimenzija: socijalna zaštita (SPI), radni odnosi (LRI) i ranjive skupine (VGI).
 
 ```{r social-dimensions}
 #| label: social-dimensions
@@ -923,7 +1281,35 @@ if (length(social_indices) > 0) {
 
 # Sektorska analiza
 
-## Dinamika po dimenzijama
+## Konstrukcija sektorskih indeksa
+
+Sektorski indeksi se konstruiraju za svaku od 12 makro kategorija semantičke taksonomije. Za svaki sektor se izračunava mjesečni zbroj pojmova, koji se zatim normalizira na skalu 0-100 korištenjem min-max skaliranja unutar svakog sektora.
+
+Sektorski indeksi omogućuju praćenje dinamike specifičnih tema tržišta rada neovisno o ostalim temama. Na primjer, sektor "plaće" može rasti dok sektor "nezaposlenost" pada, što bi signaliziralo pomak fokusa s problema nezaposlenosti na rasprave o plaćama.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija sektorskih indeksa"}
+
+**Formula za sektorski indeks:**
+
+$$
+\text{Sektor}_{s,t} = \text{normalize}_{0-100}\left(\text{macro}_{s,t}\right)
+$$
+
+gdje je $\text{macro}_{s,t}$ zbroj svih pojmova iz makro kategorije $s$ u mjesecu $t$.
+
+**Napomena o normalizaciji:**
+
+Sektorski indeksi se normaliziraju **unutar svakog sektora**, što znači da vrijednosti različitih sektora nisu izravno usporedive.
+
+**Primjena LOESS izglađivanja:**
+
+Na grafikonima se koristi LOESS (Locally Estimated Scatterplot Smoothing) za prikaz trenda.
+
+:::
+
+## Dinamika sektorskih indeksa
+
+Na sljedećim grafikonima se prikazuje dinamika 12 dimenzija tržišta rada kroz vrijeme.
 
 ```{r sector-dynamics}
 #| label: sector-dynamics
@@ -963,7 +1349,25 @@ ggplot(sector_long, aes(x = yearmonth, y = vrijednost_norm)) +
   )
 ```
 
-## Heatmapa dimenzija
+## Heatmapa sektorske aktivnosti
+
+Heatmapa pruža vizualni pregled intenziteta svih sektorskih indeksa kroz vrijeme na jednom grafikonu. Svaki redak predstavlja jednu dimenziju, svaki stupac predstavlja jedan mjesec, a boja ćelije predstavlja normalizirani intenzitet aktivnosti.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija heatmape"}
+
+**Konstrukcija heatmape:**
+
+1. Za svaki sektor se uzimaju mjesečne normalizirane vrijednosti (0-100)
+2. Podaci se organiziraju u matricu (sektori × mjeseci)
+3. Vrijednosti se mapiraju na kontinuiranu skalu boja (plasma paleta)
+
+**Interpretacija:**
+
+- Horizontalni uzorci: promjene aktivnosti jedne dimenzije kroz vrijeme
+- Vertikalni uzorci: usporedba aktivnosti različitih dimenzija u istom mjesecu
+- Dijagonalni uzorci: prijenos fokusa s jedne dimenzije na drugu
+
+:::
 
 ```{r sector-heatmap}
 #| label: sector-heatmap
@@ -984,6 +1388,8 @@ ggplot(heatmap_data, aes(x = yearmonth, y = dimenzija, fill = vrijednost_norm)) 
 ```
 
 ## Korelacijska struktura
+
+Korelacijska matrica prikazuje međusobne odnose između svih konstruiranih indeksa i sektorskih kategorija. Pozitivna korelacija (crvena) ukazuje na to da dva indeksa/sektora tendiraju rasti i padati zajedno, dok negativna korelacija (plava) ukazuje na obrnuti odnos.
 
 ```{r correlation-matrix}
 #| label: correlation-matrix
@@ -1015,12 +1421,43 @@ corrplot(cor_matrix,
 
 # Sentiment analiza
 
-## Sentiment komponente
+## Konstrukcija sentiment indeksa
+
+Sentiment analiza na tržištu rada se fokusira na razlikovanje pozitivnog i negativnog izvještavanja. Za svaki članak se broje pojmovi iz pozitivnog leksikona (rast zaposlenosti, nova radna mjesta, povišice) i negativnog leksikona (otpuštanja, otkazi, štrajkovi, emigracija).
+
+Na temelju ovih brojeva se izračunavaju tri mjere:
+
+1. **Neto sentiment**: razlika između pozitivnih i negativnih pojmova
+2. **Omjer sentimenta**: normalizirana razlika na skalu -1 do +1
+3. **LSI (Labor Sentiment Index)**: volumen prilagođen za sentiment na skalu 0-100
+
+::: {.callout-note collapse="true" title="Tehnička metodologija sentiment analize"}
+
+**Formule:**
+
+$$
+\text{Neto sentiment}_t = \sum_{p \in P} \text{count}_{p,t} - \sum_{n \in N} \text{count}_{n,t}
+$$
+
+gdje je $P$ skup pozitivnih pojmova, a $N$ skup negativnih pojmova.
+
+$$
+\text{Omjer sentimenta}_t = \frac{\text{Pozitivno}_t - \text{Negativno}_t}{\text{Pozitivno}_t + \text{Negativno}_t}
+$$
+
+**Intenzitet jezika:**
+
+Dodatno se mjeri intenzitet jezika korištenjem leksikona intenziteta:
+
+- Visoki intenzitet: "značajan rast", "masovna otpuštanja", "rekordan"
+- Niski intenzitet: "minimalan", "zanemariv", "neznatan"
+
+:::
 
 ```{r sentiment-components}
 #| label: sentiment-components
 #| fig-cap: "Labor sentiment komponente kroz vrijeme"
-#| fig-height: 12
+#| fig-height: 10
 
 p_sent1 <- ggplot(monthly, aes(x = yearmonth)) +
   geom_col(aes(y = sent_positive_avg), fill = pal$success, alpha = 0.7) +
@@ -1050,26 +1487,44 @@ p_sent3 <- ggplot(monthly, aes(x = yearmonth)) +
 p_sent1 / p_sent2 / p_sent3
 ```
 
-## Uncertainty vs Sentiment
-
-```{r uncertainty-sentiment-scatter}
-#| label: uncertainty-sentiment-scatter
-#| fig-cap: "Odnos neizvjesnosti i sentimenta na tržištu rada"
-#| fig-height: 6
-
-ggplot(monthly, aes(x = LUI, y = LSI)) +
-  geom_point(aes(size = N, color = yearmonth), alpha = 0.7) +
-  geom_smooth(method = "lm", se = TRUE, color = pal$primary) +
-  scale_color_viridis_c(option = "viridis", labels = function(x) format(as.Date(x, origin = "1970-01-01"), "%b %Y")) +
-  labs(
-    title = "Labor Uncertainty vs Labor Sentiment",
-    x = "Labor Uncertainty Index", y = "Labor Sentiment Index",
-    size = "Broj članaka", color = "Mjesec"
-  ) +
-  theme(legend.position = "right")
-```
-
 # Volatilnost i momentum
+
+## Konstrukcija mjera volatilnosti i momenta
+
+Volatilnost i momentum se koriste za procjenu stabilnosti i smjera kretanja indeksa tržišta rada. Volatilnost mjeri koliko indeks varira u kratkom roku, dok momentum mjeri smjer i intenzitet promjene.
+
+**Volatilnost** se izračunava kao standardna devijacija indeksa u kliznom prozoru od 3 mjeseca. Viša volatilnost ukazuje na nestabilnije uvjete na tržištu rada.
+
+**Momentum** se izračunava kao razlika između trenutne vrijednosti i vrijednosti u prethodnom razdoblju.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija volatilnosti i momenta"}
+
+**Formula za volatilnost (3M rolling SD):**
+
+$$
+\text{Vol}_{t} = \sqrt{\frac{1}{2}\sum_{i=t-2}^{t}(x_i - \bar{x}_{t-2:t})^2}
+$$
+
+**Formula za mjesečni momentum:**
+
+$$
+\text{Mom}_{1M,t} = x_t - x_{t-1}
+$$
+
+**Formula za tromjesečni momentum:**
+
+$$
+\text{Mom}_{3M,t} = x_t - x_{t-3}
+$$
+
+**Interpretacija:**
+
+- Visoka volatilnost + pozitivan momentum: brzi rast s nestabilnošću
+- Visoka volatilnost + negativan momentum: brzi pad s nestabilnošću
+- Niska volatilnost + pozitivan momentum: stabilan rast
+- Niska volatilnost + negativan momentum: stabilan pad
+
+:::
 
 ```{r volatility-momentum}
 #| label: volatility-momentum
@@ -1121,7 +1576,37 @@ p_combined <- ggplot(monthly, aes(x = yearmonth)) +
 p_vol / p_mom / p_mom3 / p_combined
 ```
 
-# Topic concentration
+# Koncentracija tema
+
+## Konstrukcija mjera koncentracije
+
+Koncentracija tema mjeri koliko je medijski diskurs fokusiran na mali broj tema nasuprot disperziji na mnogo tema. Za mjerenje koncentracije koristi se Herfindahl-Hirschman indeks (HHI).
+
+**Visoki HHI** (bliže 1) ukazuje na fokus medija na jednu ili nekoliko dominantnih tema, što je tipično za razdoblja kriza kada jedna tema dominira (npr. masovna otpuštanja).
+
+**Niski HHI** (bliže 0) ukazuje na disperziju pažnje na mnogo tema, što je tipično za stabilnija razdoblja.
+
+::: {.callout-note collapse="true" title="Tehnička metodologija koncentracije tema"}
+
+**Herfindahl-Hirschman Index (HHI):**
+
+$$
+\text{HHI}_t = \sum_{s=1}^{S} \left(\frac{x_{s,t}}{\sum_{s=1}^{S} x_{s,t}}\right)^2
+$$
+
+gdje je $x_{s,t}$ vrijednost sektora $s$ u mjesecu $t$, a $S$ broj sektora.
+
+**Interpretacija HHI:**
+
+- HHI = 1: potpuna koncentracija (samo jedna tema)
+- HHI = 1/S: potpuna disperzija (sve teme jednako zastupljene)
+
+**Primjena:**
+
+- Rastući HHI: fokusiranje pažnje na dominantnu temu
+- Padajući HHI: disperzija pažnje ili pojava novih tema
+
+:::
 
 ```{r topic-concentration}
 #| label: topic-concentration
@@ -1157,6 +1642,8 @@ p_hhi / p_count
 ```
 
 # Korelacije između indeksa
+
+U sljedećoj tablici se prikazuje korelacijska matrica svih konstruiranih indeksa tržišta rada. Korelacije omogućuju razumijevanje međusobnih odnosa između različitih aspekata tržišta rada.
 
 ```{r index-correlations}
 #| label: index-correlations
@@ -1239,6 +1726,8 @@ cat("Excel exportiran:", output_path, "\n")
 
 # Sažetak
 
+U ovoj analizi je konstruirano dvanaest indeksa tržišta rada temeljenih na semantičkoj analizi medijskog diskursa. Indeksi obuhvaćaju različite aspekte tržišta rada: ukupnu pokrivenost (LVI), dinamiku zapošljavanja (EDI), pritisak na plaće (WPI), napetost tržišta (LMTI), sentiment (LSI), neizvjesnost (LUI), prognostičku orijentaciju (LFLI), socijalnu zaštitu (SPI), radne odnose (LRI), ranjive skupine (VGI), sintetičku mjeru temeljenu na PCA (PCI) i kompozitni indeks (CLI).
+
 ```{r summary}
 #| label: summary
 
@@ -1273,4 +1762,4 @@ kable(summary_table, caption = "Sažetak analize tržišta rada") %>%
 
 *Izvještaj generiran: `r Sys.time()`*
 
-*GIMES Research | Semantički indeks tržišta rada v1.0*
+*GIMES Research | Semantički indeks tržišta rada v2.0*

@@ -195,7 +195,7 @@ Projekt koristi trostupanjski cjevovod:
 
 ---
 
-### 7. Društveno povjerenje [izvještaj]()
+### 7. Društveno povjerenje [izvještaj](https://raw.githack.com/lusiki/GIMES_HR-inflacija/main/code/03_analysis/report_povjerenje.html)
 
 **Fokus**: Institucionalno povjerenje, zadovoljstvo životom, društveno raspoloženje, perspektive budućnosti
 
